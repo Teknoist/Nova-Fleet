@@ -10,6 +10,15 @@ const starterPrinters: PrinterConfig[] = [
   { id: 'demo-studio', name: 'Tasarım Stüdyosu', host: 'demo-3', port: 8081, model: 'Nova3D Whale3', location: '2. Kat', pollInterval: 15, enabled: true },
 ]
 
+function normalizeAddress(rawHost: string, rawPort: number) {
+  const text = rawHost.trim().replace(/^https?:\/\//, '').replace(/\/.*$/, '')
+  const match = text.match(/^(.+?):(\d+)$/)
+  return {
+    host: (match ? match[1] : text).trim(),
+    port: match ? Number(match[2]) : Number(rawPort) || 8081,
+  }
+}
+
 export class PrinterStore {
   private get filePath() { return join(app.getPath('userData'), 'printers.json') }
 
@@ -30,14 +39,14 @@ export class PrinterStore {
 
   async save(input: SavePrinterInput): Promise<PrinterConfig> {
     const printers = await this.list()
-    const normalizedHost = input.host.trim().replace(/^https?:\/\//, '').replace(/\/$/, '')
-    if (!normalizedHost) throw new Error('Geçerli bir IP adresi veya sunucu adı girin.')
+    const address = normalizeAddress(input.host, Number(input.port))
+    if (!address.host) throw new Error('Geçerli bir IP adresi veya sunucu adı girin.')
     const printer: PrinterConfig = {
       ...input,
       id: input.id || randomUUID(),
       name: input.name.trim() || 'İsimsiz yazıcı',
-      host: normalizedHost,
-      port: Number(input.port) || 8081,
+      host: address.host,
+      port: address.port,
       pollInterval: Math.max(5, Number(input.pollInterval) || 10),
     }
     const index = printers.findIndex((item) => item.id === printer.id)
