@@ -25,6 +25,12 @@ function requestBuffer(url: URL, method = 'GET', timeout = 4500): Promise<Buffer
   })
 }
 
+function parseJsonArray(buffer: Buffer, label: string): Record<string, unknown>[] {
+  const data = JSON.parse(buffer.toString('utf8'))
+  if (!Array.isArray(data)) throw new Error(`${label} JSON dizisi değil.`)
+  return data as Record<string, unknown>[]
+}
+
 export function normalizeFile(value: Record<string, unknown>): NovaFile {
   const name = String(value.name ?? '')
   const extension = String(value.extension ?? '').replace(/^\./, '')
@@ -41,10 +47,10 @@ export function normalizeJob(value: Record<string, unknown>): PrintJob {
   const totalSlices = Number(value.totalSlices ?? 0)
   const currentSlice = Number(value.currentSlice ?? 0)
   return {
-    id: String(value.id ?? ''),
-    jobName: String(value.jobName ?? 'İsimsiz iş'),
-    printInProgress: Boolean(value.printInProgress),
-    printPaused: Boolean(value.printPaused),
+    id: String(value.id ?? value.uuid ?? value.jobId ?? ''),
+    jobName: String(value.jobName ?? value.fileName ?? value.name ?? 'İsimsiz iş'),
+    printInProgress: Boolean(value.printInProgress ?? value.printing ?? value.active),
+    printPaused: Boolean(value.printPaused ?? value.paused),
     status: String(value.status ?? ''),
     thickness: Number(value.thickness ?? 0),
     totalSlices,
@@ -64,26 +70,40 @@ const demoFiles: NovaFile[] = [
 
 export class NovaClient {
   private url(printer: PrinterConfig, path: string) {
-    return new URL(`http://${printer.host}:${printer.port}${path}`)
+    return new URL(`http://${printer.host}:${printer.port || 8081}${path}`)
   }
 
   async snapshot(printer: PrinterConfig): Promise<PrinterSnapshot> {
     if (printer.host.startsWith('demo-')) return this.demoSnapshot(printer)
     const started = performance.now()
     try {
-      // Nova firmware can lock up under aggressive polling; keep requests sequential.
-      const fileData = JSON.parse((await requestBuffer(this.url(printer, '/file/list'))).toString('utf8')) as Record<string, unknown>[]
-      const jobData = JSON.parse((await requestBuffer(this.url(printer, '/job/list/'))).toString('utf8')) as Record<string, unknown>[]
-      const files = Array.isArray(fileData) ? fileData.map(normalizeFile) : []
-      const jobs = Array.isArray(jobData) ? jobData.map(normalizeJob) : []
+      // Nova3D firmware 2.1.6 answers /file/list as the most reliable connection test.
+      const fileData = parseJsonArray(await requestBuffer(this.url(printer, '/file/list'), 'GET', 7000), 'Dosya listesi')
+      const files = fileData.map(normalizeFile)
+      let jobs: PrintJob[] = []
+      let jobError = ''
+      let firmware: string | undefined
+      let model: string | undefined
+
+      try { jobs = parseJsonArray(await requestBuffer(this.url(printer, '/job/list/'), 'GET', 4500), 'İş listesi').map(normalizeJob) }
+      catch (error) { jobError = error instanceof Error ? error.message : 'İş listesi alınamadı.' }
+
+      try { firmware = (await requestBuffer(this.url(printer, '/setting/currentVersion'), 'GET', 3500)).toString('utf8').trim() || undefined }
+      catch { /* optional endpoint */ }
+
+      try { model = (await requestBuffer(this.url(printer, '/setting/printerInfo'), 'GET', 3500)).toString('utf8').trim() || undefined }
+      catch { /* optional endpoint */ }
+
       const activeJob = jobs.find((job) => job.printInProgress || job.printPaused)
       return {
-        config: printer,
+        config: { ...printer, model: model || printer.model },
         state: activeJob?.printPaused ? 'paused' : activeJob?.printInProgress ? 'printing' : 'online',
         latency: Math.round(performance.now() - started),
+        firmware,
         files,
         usedBytes: files.reduce((sum, file) => sum + file.size, 0),
         activeJob,
+        error: jobError || undefined,
         lastSeen: new Date().toISOString(),
       }
     } catch (error) {
