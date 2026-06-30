@@ -18,7 +18,12 @@ function createWindow() {
     backgroundColor: '#0d0f0f',
     titleBarStyle: 'hiddenInset',
     autoHideMenuBar: true,
-    webPreferences: { preload: join(__dirname, 'preload.cjs'), contextIsolation: true, nodeIntegration: false, sandbox: true },
+    webPreferences: {
+      preload: join(__dirname, 'preload.js'),
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: false,
+    },
   })
   window.webContents.setWindowOpenHandler(({ url }) => { void shell.openExternal(url); return { action: 'deny' } })
   if (process.env.VITE_DEV_SERVER_URL) void window.loadURL(process.env.VITE_DEV_SERVER_URL)
