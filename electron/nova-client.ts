@@ -7,6 +7,8 @@ import type { NovaFile, PrintJob, PrinterConfig, PrinterSnapshot } from '../src/
 
 const demoStartedAt = Date.now() - 52 * 60 * 1000
 
+type EndpointMode = 'nova8081' | 'services'
+
 function requestBuffer(url: URL, method = 'GET', timeout = 4500): Promise<Buffer> {
   return new Promise((resolve, reject) => {
     const request = (url.protocol === 'https:' ? httpsRequest : httpRequest)(url, { method, timeout }, (response) => {
@@ -15,7 +17,7 @@ function requestBuffer(url: URL, method = 'GET', timeout = 4500): Promise<Buffer
       response.on('end', () => {
         const body = Buffer.concat(chunks)
         if ((response.statusCode ?? 500) < 200 || (response.statusCode ?? 500) >= 300) {
-          reject(new Error(`Yazıcı HTTP ${response.statusCode}: ${body.toString('utf8').slice(0, 160)}`))
+          reject(new Error(`HTTP ${response.statusCode}: ${body.toString('utf8').slice(0, 160)}`))
         } else resolve(body)
       })
     })
@@ -25,40 +27,98 @@ function requestBuffer(url: URL, method = 'GET', timeout = 4500): Promise<Buffer
   })
 }
 
+function text(buffer: Buffer) {
+  return buffer.toString('utf8').trim()
+}
+
 function parseJsonArray(buffer: Buffer, label: string): Record<string, unknown>[] {
-  const data = JSON.parse(buffer.toString('utf8'))
-  if (!Array.isArray(data)) throw new Error(`${label} JSON dizisi değil.`)
-  return data as Record<string, unknown>[]
+  const raw = text(buffer)
+  const data = JSON.parse(raw)
+  if (Array.isArray(data)) return data as Record<string, unknown>[]
+  if (data && typeof data === 'object') {
+    const object = data as Record<string, unknown>
+    for (const key of ['data', 'files', 'printables', 'printJobs', 'jobs', 'items']) {
+      const value = object[key]
+      if (Array.isArray(value)) return value as Record<string, unknown>[]
+    }
+  }
+  throw new Error(`${label} JSON dizisi değil.`)
+}
+
+function bool(value: unknown) {
+  if (typeof value === 'boolean') return value
+  if (typeof value === 'number') return value !== 0
+  if (typeof value === 'string') return ['true', '1', 'yes', 'printing', 'paused', 'active'].includes(value.toLowerCase())
+  return false
+}
+
+function number(value: unknown) {
+  const parsed = Number(value ?? 0)
+  return Number.isFinite(parsed) ? parsed : 0
+}
+
+function string(value: unknown, fallback = '') {
+  return value === undefined || value === null ? fallback : String(value)
+}
+
+function pick<T>(value: Record<string, unknown>, keys: string[], fallback?: T) {
+  for (const key of keys) if (value[key] !== undefined && value[key] !== null) return value[key] as T
+  return fallback as T
+}
+
+function cleanAddress(printer: PrinterConfig) {
+  const cleaned = printer.host.trim().replace(/^https?:\/\//, '').replace(/\/.*$/, '')
+  const match = cleaned.match(/^(.+?):(\d+)$/)
+  return {
+    host: (match ? match[1] : cleaned).trim(),
+    port: match ? Number(match[2]) : Number(printer.port) || 8081,
+  }
+}
+
+function makeFileName(rawName: string, rawExtension: string) {
+  const extension = rawExtension.replace(/^\./, '')
+  if (!extension) {
+    const parts = rawName.split('.')
+    return { name: rawName, extension: parts.length > 1 ? parts.pop() ?? '' : '', fullName: rawName }
+  }
+  const fullName = rawName.toLowerCase().endsWith(`.${extension.toLowerCase()}`) ? rawName : `${rawName}.${extension}`
+  const name = fullName.toLowerCase().endsWith(`.${extension.toLowerCase()}`) ? fullName.slice(0, -extension.length - 1) : rawName
+  return { name, extension, fullName }
 }
 
 export function normalizeFile(value: Record<string, unknown>): NovaFile {
-  const name = String(value.name ?? '')
-  const extension = String(value.extension ?? '').replace(/^\./, '')
+  const rawName = string(pick(value, ['name', 'fileName', 'filename', 'printableName', 'path'], ''))
+  const rawExtension = string(pick(value, ['extension', 'type', 'fileType'], ''))
+  const names = makeFileName(rawName, rawExtension)
   return {
-    name,
-    extension,
-    size: Number(value.size ?? 0),
-    modifiedDate: String(value.modifiedDate ?? ''),
-    fullName: extension && !name.toLowerCase().endsWith(`.${extension.toLowerCase()}`) ? `${name}.${extension}` : name,
+    name: names.name,
+    extension: names.extension,
+    size: number(pick(value, ['size', 'fileSize', 'bytes'], 0)),
+    modifiedDate: string(pick(value, ['modifiedDate', 'modified', 'lastModified', 'date'], '')),
+    fullName: names.fullName,
   }
 }
 
 export function normalizeJob(value: Record<string, unknown>): PrintJob {
-  const totalSlices = Number(value.totalSlices ?? 0)
-  const currentSlice = Number(value.currentSlice ?? 0)
+  const totalSlices = number(pick(value, ['totalSlices', 'totalSlice', 'totalLayers', 'slices'], 0))
+  const currentSlice = number(pick(value, ['currentSlice', 'slice', 'currentLayer', 'layer'], 0))
+  const status = string(pick(value, ['status', 'state'], ''))
+  const statusLower = status.toLowerCase()
+  const printPaused = bool(pick(value, ['printPaused', 'paused', 'isPaused'], false)) || statusLower.includes('pause')
+  const printInProgress = bool(pick(value, ['printInProgress', 'printing', 'active', 'isPrinting'], false)) || statusLower.includes('print') || totalSlices > 0
   return {
-    id: String(value.id ?? value.uuid ?? value.jobId ?? ''),
-    jobName: String(value.jobName ?? value.fileName ?? value.name ?? 'İsimsiz iş'),
-    printInProgress: Boolean(value.printInProgress ?? value.printing ?? value.active),
-    printPaused: Boolean(value.printPaused ?? value.paused),
-    status: String(value.status ?? ''),
-    thickness: Number(value.thickness ?? 0),
+    id: string(pick(value, ['id', 'uuid', 'jobId', 'guid'], '')),
+    jobName: string(pick(value, ['jobName', 'fileName', 'filename', 'name', 'printableName'], 'İsimsiz iş')),
+    printInProgress,
+    printPaused,
+    status,
+    thickness: number(pick(value, ['thickness', 'layerHeight', 'sliceHeight'], 0)),
     totalSlices,
     currentSlice,
-    currentSliceTime: Number(value.currentSliceTime ?? 0),
-    averageSliceTime: Number(value.averageSliceTime ?? 0),
-    elapsedTime: Number(value.elapsedTime ?? 0),
-    progress: totalSlices > 0 ? Math.min(100, (currentSlice / totalSlices) * 100) : 0,
+    currentSliceTime: number(pick(value, ['currentSliceTime', 'sliceTime'], 0)),
+    averageSliceTime: number(pick(value, ['averageSliceTime', 'avgSliceTime', 'estimatedSliceTime'], 0)),
+    elapsedTime: number(pick(value, ['elapsedTime', 'elapsed'], 0)),
+    progress: totalSlices > 0 ? Math.min(100, (currentSlice / totalSlices) * 100) : number(pick(value, ['progress', 'percentage'], 0)),
   }
 }
 
@@ -69,30 +129,64 @@ const demoFiles: NovaFile[] = [
 ]
 
 export class NovaClient {
-  private url(printer: PrinterConfig, path: string) {
-    return new URL(`http://${printer.host}:${printer.port || 8081}${path}`)
+  private url(printer: PrinterConfig, path: string, mode: EndpointMode = 'nova8081', forcePort = false) {
+    const address = cleanAddress(printer)
+    const portPart = mode === 'nova8081' || forcePort ? `:${address.port || 8081}` : ''
+    return new URL(`http://${address.host}${portPart}${path}`)
+  }
+
+  private serviceUrls(printer: PrinterConfig, path: string) {
+    return [this.url(printer, path, 'services'), this.url(printer, path, 'services', true)]
+  }
+
+  private async requestFirst(candidates: { url: URL; mode: EndpointMode }[], method = 'GET', timeout = 4500) {
+    const errors: string[] = []
+    for (const candidate of candidates) {
+      try {
+        return { body: await requestBuffer(candidate.url, method, timeout), mode: candidate.mode }
+      } catch (error) {
+        errors.push(`${candidate.url.pathname}: ${error instanceof Error ? error.message : String(error)}`)
+      }
+    }
+    throw new Error(errors.join(' | ') || 'Yazıcı cevap vermedi.')
   }
 
   async snapshot(printer: PrinterConfig): Promise<PrinterSnapshot> {
     if (printer.host.startsWith('demo-')) return this.demoSnapshot(printer)
     const started = performance.now()
     try {
-      // Nova3D firmware 2.1.6 answers /file/list as the most reliable connection test.
-      const fileData = parseJsonArray(await requestBuffer(this.url(printer, '/file/list'), 'GET', 7000), 'Dosya listesi')
-      const files = fileData.map(normalizeFile)
+      const fileResult = await this.requestFirst([
+        { url: this.url(printer, '/file/list'), mode: 'nova8081' },
+        ...this.serviceUrls(printer, '/services/printables/list').map((url) => ({ url, mode: 'services' as EndpointMode })),
+      ], 'GET', 7000)
+      const files = parseJsonArray(fileResult.body, 'Dosya listesi').map(normalizeFile)
       let jobs: PrintJob[] = []
       let jobError = ''
       let firmware: string | undefined
       let model: string | undefined
+      let printerInfo: string | undefined
 
-      try { jobs = parseJsonArray(await requestBuffer(this.url(printer, '/job/list/'), 'GET', 4500), 'İş listesi').map(normalizeJob) }
-      catch (error) { jobError = error instanceof Error ? error.message : 'İş listesi alınamadı.' }
+      try {
+        const jobResult = await this.requestFirst([
+          { url: this.url(printer, '/job/list/'), mode: 'nova8081' },
+          { url: this.url(printer, '/job/list'), mode: 'nova8081' },
+          ...this.serviceUrls(printer, '/services/printJobs/list').map((url) => ({ url, mode: 'services' as EndpointMode })),
+        ], 'GET', 4500)
+        jobs = parseJsonArray(jobResult.body, 'İş listesi').map(normalizeJob)
+      } catch (error) {
+        jobError = error instanceof Error ? error.message : 'İş listesi alınamadı.'
+      }
 
-      try { firmware = (await requestBuffer(this.url(printer, '/setting/currentVersion'), 'GET', 3500)).toString('utf8').trim() || undefined }
+      try { firmware = text((await this.requestFirst([{ url: this.url(printer, '/setting/currentVersion'), mode: 'nova8081' }], 'GET', 3500)).body) || undefined }
       catch { /* optional endpoint */ }
 
-      try { model = (await requestBuffer(this.url(printer, '/setting/printerInfo'), 'GET', 3500)).toString('utf8').trim() || undefined }
-      catch { /* optional endpoint */ }
+      try {
+        printerInfo = text((await this.requestFirst([
+          { url: this.url(printer, '/setting/printerInfo'), mode: 'nova8081' },
+          { url: this.url(printer, '/setting/model'), mode: 'nova8081' },
+        ], 'GET', 3500)).body) || undefined
+        model = printerInfo
+      } catch { /* optional endpoint */ }
 
       const activeJob = jobs.find((job) => job.printInProgress || job.printPaused)
       return {
@@ -100,6 +194,7 @@ export class NovaClient {
         state: activeJob?.printPaused ? 'paused' : activeJob?.printInProgress ? 'printing' : 'online',
         latency: Math.round(performance.now() - started),
         firmware,
+        printerInfo: printerInfo || `API: ${fileResult.mode === 'nova8081' ? 'Nova3D 8081' : 'Photonic3D services'}`,
         files,
         usedBytes: files.reduce((sum, file) => sum + file.size, 0),
         activeJob,
@@ -113,7 +208,22 @@ export class NovaClient {
 
   async command(printer: PrinterConfig, path: string) {
     if (printer.host.startsWith('demo-')) return
-    await requestBuffer(this.url(printer, path), 'GET', 10_000)
+    const servicesFallback = this.commandFallbacks(printer, path)
+    await this.requestFirst([{ url: this.url(printer, path), mode: 'nova8081' }, ...servicesFallback], 'GET', 10_000)
+  }
+
+  private commandFallbacks(printer: PrinterConfig, path: string) {
+    const map: Array<[RegExp, string]> = [
+      [/^\/file\/delete\/(.+)$/u, '/services/printables/delete/$1'],
+      [/^\/file\/print\/(.+)$/u, '/services/printables/print/$1'],
+      [/^\/job\/toggle\/(.+)$/u, '/services/printJobs/togglePause/$1'],
+      [/^\/job\/stop\/(.+)$/u, '/services/printJobs/stopJob/$1'],
+    ]
+    for (const [pattern, replacement] of map) {
+      const next = path.replace(pattern, replacement)
+      if (next !== path) return this.serviceUrls(printer, next).map((url) => ({ url, mode: 'services' as EndpointMode }))
+    }
+    return []
   }
 
   async upload(printer: PrinterConfig, filePath: string, onProgress: (percent: number) => void) {
@@ -123,7 +233,24 @@ export class NovaClient {
     }
     const fileName = basename(filePath)
     const fileSize = (await stat(filePath)).size
-    const url = this.url(printer, `/file/upload/${encodeURIComponent(fileName)}`)
+    const encoded = encodeURIComponent(fileName)
+    const candidates = [
+      this.url(printer, `/file/upload/${encoded}`),
+      ...this.serviceUrls(printer, `/services/printables/uploadPrintableFile/${encoded}`),
+    ]
+    const errors: string[] = []
+    for (const url of candidates) {
+      try {
+        await this.uploadTo(url, filePath, fileSize, onProgress)
+        return
+      } catch (error) {
+        errors.push(`${url.pathname}: ${error instanceof Error ? error.message : String(error)}`)
+      }
+    }
+    throw new Error(errors.join(' | ') || 'Yükleme başarısız.')
+  }
+
+  private async uploadTo(url: URL, filePath: string, fileSize: number, onProgress: (percent: number) => void) {
     await new Promise<void>((resolve, reject) => {
       const request = httpRequest(url, { method: 'POST', headers: { 'Content-Type': 'application/octet-stream', 'Content-Length': fileSize }, timeout: 120_000 }, (response) => {
         response.resume()
@@ -140,7 +267,7 @@ export class NovaClient {
   }
 
   private demoSnapshot(printer: PrinterConfig): PrinterSnapshot {
-    if (printer.host === 'demo-2') return { config: printer, state: 'online', latency: 18, firmware: '3.5.0', files: demoFiles.slice(1), usedBytes: demoFiles.slice(1).reduce((sum, item) => sum + item.size, 0), lastSeen: new Date().toISOString() }
+    if (printer.host === 'demo-2') return { config: printer, state: 'online', latency: 18, firmware: '3.5.0', printerInfo: 'API: Nova3D 8081', files: demoFiles.slice(1), usedBytes: demoFiles.slice(1).reduce((sum, item) => sum + item.size, 0), lastSeen: new Date().toISOString() }
     if (printer.host === 'demo-3') return { config: printer, state: 'offline', files: [], usedBytes: 0, error: 'Yazıcı ağda yanıt vermiyor.' }
     const elapsed = Date.now() - demoStartedAt
     const currentSlice = Math.min(1842, 920 + Math.floor(elapsed / 14_000))
@@ -150,6 +277,6 @@ export class NovaClient {
       currentSliceTime: 14_000, averageSliceTime: 14_200, elapsedTime: elapsed,
       progress: (currentSlice / 1842) * 100,
     }
-    return { config: printer, state: 'printing', latency: 24, firmware: '3.5.0', files: demoFiles, usedBytes: demoFiles.reduce((sum, item) => sum + item.size, 0), activeJob, lastSeen: new Date().toISOString() }
+    return { config: printer, state: 'printing', latency: 24, firmware: '3.5.0', printerInfo: 'API: Nova3D 8081', files: demoFiles, usedBytes: demoFiles.reduce((sum, item) => sum + item.size, 0), activeJob, lastSeen: new Date().toISOString() }
   }
 }
