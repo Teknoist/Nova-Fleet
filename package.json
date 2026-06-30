@@ -1,6 +1,6 @@
 {
   "name": "nova-fleet",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": true,
   "author": "Teknoist",
   "license": "MIT",
@@ -20,7 +20,7 @@
     "lint": "eslint .",
     "preview": "vite preview",
     "start": "electron .",
-    "package:win": "npm run build && electron-builder --win nsis"
+    "package:win": "npm run build && electron-builder --win nsis --publish never"
   },
   "dependencies": {
     "@fontsource/dm-mono": "^5.2.7",
