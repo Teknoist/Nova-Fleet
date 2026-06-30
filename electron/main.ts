@@ -1,4 +1,5 @@
 import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron'
+import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import type { SavePrinterInput } from '../src/shared/types.js'
@@ -9,6 +10,42 @@ const __dirname = fileURLToPath(new URL('.', import.meta.url))
 const store = new PrinterStore()
 const client = new NovaClient()
 
+function errorHtml(title: string, detail: string) {
+  return `<!doctype html><html lang="tr"><head><meta charset="UTF-8"><title>Nova Fleet</title><style>
+    body{margin:0;background:#0d0f0f;color:#eef4ef;font-family:Segoe UI,Arial,sans-serif;display:grid;place-items:center;min-height:100vh}
+    main{max-width:760px;padding:34px;border:1px solid #28322c;border-radius:14px;background:#131715;box-shadow:0 18px 70px rgba(0,0,0,.35)}
+    h1{margin:0 0 12px;font-size:24px}p{color:#aab5ae;line-height:1.55}pre{white-space:pre-wrap;background:#0b0d0d;border:1px solid #252b27;border-radius:10px;padding:14px;color:#f2c069;overflow:auto}
+  </style></head><body><main><h1>${title}</h1><p>Uygulama siyah ekranda kalmasın diye hata yakalayıcı devreye girdi.</p><pre>${detail.replace(/[<>&]/g, (c) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;' }[c] ?? c))}</pre></main></body></html>`
+}
+
+async function loadRenderer(window: BrowserWindow) {
+  window.webContents.on('render-process-gone', (_event, details) => {
+    void window.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(errorHtml('Renderer çöktü', JSON.stringify(details, null, 2)))}`)
+  })
+  window.webContents.on('did-fail-load', (_event, errorCode, errorDescription, validatedURL) => {
+    void window.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(errorHtml('Arayüz yüklenemedi', `${errorCode} - ${errorDescription}\n${validatedURL}`))}`)
+  })
+  window.webContents.on('console-message', (_event, level, message, line, sourceId) => {
+    console.log(`[renderer:${level}] ${message} (${sourceId}:${line})`)
+  })
+
+  if (process.env.VITE_DEV_SERVER_URL) {
+    await window.loadURL(process.env.VITE_DEV_SERVER_URL)
+    return
+  }
+
+  const candidates = [
+    join(__dirname, '../../dist/index.html'),
+    join(app.getAppPath(), 'dist/index.html'),
+  ]
+  const indexFile = candidates.find((candidate) => existsSync(candidate))
+  if (!indexFile) {
+    await window.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(errorHtml('dist/index.html bulunamadı', candidates.join('\n')))}`)
+    return
+  }
+  await window.loadFile(indexFile)
+}
+
 function createWindow() {
   const window = new BrowserWindow({
     width: 1480,
@@ -18,6 +55,7 @@ function createWindow() {
     backgroundColor: '#0d0f0f',
     titleBarStyle: 'hiddenInset',
     autoHideMenuBar: true,
+    show: false,
     webPreferences: {
       preload: join(__dirname, 'preload.js'),
       contextIsolation: true,
@@ -25,9 +63,12 @@ function createWindow() {
       sandbox: false,
     },
   })
+  window.once('ready-to-show', () => window.show())
   window.webContents.setWindowOpenHandler(({ url }) => { void shell.openExternal(url); return { action: 'deny' } })
-  if (process.env.VITE_DEV_SERVER_URL) void window.loadURL(process.env.VITE_DEV_SERVER_URL)
-  else void window.loadFile(join(__dirname, '../../dist/index.html'))
+  void loadRenderer(window).catch((error) => {
+    window.show()
+    void window.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(errorHtml('Nova Fleet başlatılamadı', error instanceof Error ? error.stack ?? error.message : String(error)))}`)
+  })
 }
 
 function result(error: unknown) {
