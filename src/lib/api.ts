@@ -1,4 +1,6 @@
+import { Capacitor } from '@capacitor/core'
 import type { ActionResult, NovaFleetApi, PrinterConfig, PrinterSnapshot, SavePrinterInput } from '../shared/types'
+import { androidApi } from './android-api'
 
 const configs: PrinterConfig[] = [
   { id: 'preview-1', name: 'Reçine Lab 01', host: '192.168.1.84', port: 8081, model: 'Nova3D Elfin', location: 'Prototip Atölyesi', pollInterval: 10, enabled: true },
@@ -41,4 +43,4 @@ const previewApi: NovaFleetApi = {
   onUploadProgress: () => () => undefined,
 }
 
-export const api: NovaFleetApi = window.novaFleet ?? previewApi
+export const api: NovaFleetApi = window.novaFleet ?? (Capacitor.getPlatform() === 'android' ? androidApi : previewApi)

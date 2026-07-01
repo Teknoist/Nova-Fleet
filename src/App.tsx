@@ -85,9 +85,13 @@ function App() {
   const averageProgress = printing ? snapshots.reduce((sum, item) => sum + (item.activeJob?.progress ?? 0), 0) / printing : 0
 
   async function runAction(action: () => Promise<{ ok: boolean; message?: string }>, refreshAfter = true) {
-    const response = await action()
-    toast(response.message ?? (response.ok ? 'İşlem tamamlandı.' : 'İşlem başarısız.'), response.ok ? 'success' : 'error')
-    if (response.ok && refreshAfter) await refresh(true)
+    try {
+      const response = await action()
+      toast(response.message ?? (response.ok ? 'İşlem tamamlandı.' : 'İşlem başarısız.'), response.ok ? 'success' : 'error')
+      if (response.ok && refreshAfter) await refresh(true)
+    } catch (error) {
+      toast(error instanceof Error ? error.message : 'İşlem başarısız.', 'error')
+    }
   }
 
   async function savePrinter(input: SavePrinterInput) {
@@ -114,7 +118,7 @@ function App() {
         <div className="sidebar-spacer" />
         <nav><NavItem active={view === 'settings'} icon={<Settings />} label="Ayarlar" onClick={() => setView('settings')} /></nav>
         <div className="network-card"><span className="pulse-dot" /><div><strong>Yerel ağ</strong><small>{online}/{snapshots.length} yazıcı erişilebilir</small></div></div>
-        <div className="sidebar-version">NOVA FLEET · v0.1.4</div>
+        <div className="sidebar-version">NOVA FLEET · v0.2.0</div>
       </aside>
 
       <main className="main">
@@ -136,6 +140,13 @@ function App() {
           </div>
         )}
       </main>
+      <nav className="mobile-nav" aria-label="Mobil menü">
+        <MobileNavItem active={view === 'overview'} icon={<LayoutDashboard />} label="Genel" onClick={() => setView('overview')} />
+        <MobileNavItem active={view === 'printers'} icon={<Printer />} label="Yazıcılar" onClick={() => setView('printers')} />
+        <MobileNavItem active={view === 'files'} icon={<FileBox />} label="Dosyalar" onClick={() => setView('files')} />
+        <MobileNavItem active={view === 'jobs'} icon={<Activity />} label="İşler" onClick={() => setView('jobs')} />
+        <MobileNavItem active={view === 'settings'} icon={<Settings />} label="Ayarlar" onClick={() => setView('settings')} />
+      </nav>
       {modal && <PrinterModal value={modal === 'new' ? undefined : modal} close={() => setModal(null)} save={savePrinter} />}
       {upload && upload.percent < 100 && <div className="upload-toast"><Upload size={18} /><div><strong>{upload.fileName}</strong><span>Yükleniyor · %{upload.percent}</span><div className="mini-progress"><i style={{ width: `${upload.percent}%` }} /></div></div></div>}
       <div className="toast-stack">{toasts.map((item) => <div className={`toast ${item.kind}`} key={item.id}>{item.kind === 'success' ? <Check /> : <AlertTriangle />}<span>{item.text}</span></div>)}</div>
@@ -145,6 +156,10 @@ function App() {
 
 function NavItem({ active, icon, label, count, onClick }: { active: boolean; icon: React.ReactNode; label: string; count?: number; onClick: () => void }) {
   return <button className={`nav-item ${active ? 'active' : ''}`} onClick={onClick}><span>{icon}</span>{label}{count !== undefined && <b>{count}</b>}</button>
+}
+
+function MobileNavItem({ active, icon, label, onClick }: { active: boolean; icon: React.ReactNode; label: string; onClick: () => void }) {
+  return <button className={active ? 'active' : ''} onClick={onClick}><span>{icon}</span><small>{label}</small></button>
 }
 
 function Overview({ snapshots, online, printing, queuedFiles, averageProgress, search, setSearch, setSelected, uploadFile }: { snapshots: PrinterSnapshot[]; online: number; printing: number; queuedFiles: number; averageProgress: number; search: string; setSearch: (v: string) => void; setSelected: (id: string) => void; uploadFile: (id: string) => void }) {
