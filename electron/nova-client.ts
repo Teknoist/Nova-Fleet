@@ -142,6 +142,17 @@ export function normalizeJob(value: Record<string, unknown>): PrintJob {
     averageSliceTime: number(pick(value, ['averageSliceTime', 'avgSliceTime', 'estimatedSliceTime', 'lastNAverageSliceTime'], 0)),
     elapsedTime: number(pick(value, ['elapsedTime', 'elapsed'], 0)),
     progress: totalSlices > 0 ? Math.min(100, (currentSlice / totalSlices) * 100) : number(pick(value, ['progress', 'percentage'], 0)),
+    beginPrintTime: number(pick(value, ['beginPrintTime'], 0)) || undefined,
+    endPrintTime: number(pick(value, ['endPrintTime'], 0)) || undefined,
+    layerTime: number(pick(value, ['layerTime'], 0)) || undefined,
+    bottomLayersTime: number(pick(value, ['bottomLayersTime'], 0)) || undefined,
+    numberOfBottomLayers: number(pick(value, ['numberOfBottomLayers'], 0)) || undefined,
+    resinUsage: number(pick(value, ['resinUsage'], 0)),
+    totalCost: number(pick(value, ['totalCost'], 0)),
+    totalExposureTime: number(pick(value, ['totalExposureTime'], 0)) || undefined,
+    zliftDistance: number(pick(value, ['zliftDistance'], 0)) || undefined,
+    zliftSpeed: number(pick(value, ['zliftSpeed'], 0)) || undefined,
+    errorDescription: string(pick(value, ['errorDescription'], '')) || undefined,
   }
 }
 
@@ -222,6 +233,7 @@ export class NovaClient {
         files,
         usedBytes: files.reduce((sum, file) => sum + file.size, 0),
         activeJob,
+        recentJobs: jobs.filter((job) => job !== activeJob).slice(0, 20),
         error: jobError || undefined,
         lastSeen: new Date().toISOString(),
       }
