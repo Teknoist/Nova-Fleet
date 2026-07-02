@@ -68,7 +68,9 @@ jobs:
           ./gradlew assembleDebug --no-daemon
 
       - name: Name APK
-        run: cp android/app/build/outputs/apk/debug/app-debug.apk Nova-Fleet-Android-0.2.0.apk
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          cp android/app/build/outputs/apk/debug/app-debug.apk "Nova-Fleet-Android-${VERSION}.apk"
 
       - name: Upload installable APK
         uses: actions/upload-artifact@v4
