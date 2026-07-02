@@ -61,9 +61,13 @@ function string(value: unknown, fallback = '') {
   return value === undefined || value === null ? fallback : String(value)
 }
 
-function pick<T>(value: Record<string, unknown>, keys: string[], fallback?: T) {
-  for (const key of keys) if (value[key] !== undefined && value[key] !== null) return value[key] as T
+function pick<T>(value: Record<string, unknown> | undefined, keys: string[], fallback?: T) {
+  if (value) for (const key of keys) if (value[key] !== undefined && value[key] !== null) return value[key] as T
   return fallback as T
+}
+
+function nestedObject(value: unknown) {
+  return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : undefined
 }
 
 function cleanAddress(printer: PrinterConfig) {
@@ -100,12 +104,18 @@ export function normalizeFile(value: Record<string, unknown>): NovaFile {
 }
 
 export function normalizeJob(value: Record<string, unknown>): PrintJob {
+  const printer = nestedObject(value.printer)
   const totalSlices = number(pick(value, ['totalSlices', 'totalSlice', 'totalLayers', 'slices'], 0))
   const currentSlice = number(pick(value, ['currentSlice', 'slice', 'currentLayer', 'layer'], 0))
-  const status = string(pick(value, ['status', 'state'], ''))
+  const status = string(pick(value, ['status', 'state'], pick(printer, ['status', 'state'], '')))
   const statusLower = status.toLowerCase()
-  const printPaused = bool(pick(value, ['printPaused', 'paused', 'isPaused'], false)) || statusLower.includes('pause')
-  const printInProgress = bool(pick(value, ['printInProgress', 'printing', 'active', 'isPrinting'], false)) || statusLower.includes('print') || totalSlices > 0
+  const completeStatuses = ['completed', 'complete', 'finished', 'done', 'stopped', 'cancelled', 'canceled', 'failed', 'error']
+  const isFinished = completeStatuses.some((item) => statusLower.includes(item))
+  const rawPaused = pick(value, ['printPaused', 'paused', 'isPaused'], pick(printer, ['printPaused', 'paused', 'isPaused'], undefined))
+  const rawInProgress = pick(value, ['printInProgress', 'printing', 'active', 'isPrinting'], pick(printer, ['printInProgress', 'printing', 'active', 'isPrinting'], undefined))
+  const printPaused = !isFinished && (rawPaused !== undefined ? bool(rawPaused) : statusLower.includes('pause'))
+  const statusLooksActive = ['printing', 'running', 'exposing', 'lifting', 'starting'].some((item) => statusLower.includes(item))
+  const printInProgress = !isFinished && (rawInProgress !== undefined ? bool(rawInProgress) : statusLooksActive)
   return {
     id: string(pick(value, ['id', 'uuid', 'jobId', 'guid'], '')),
     jobName: string(pick(value, ['jobName', 'fileName', 'filename', 'name', 'printableName'], 'İsimsiz iş')),
@@ -116,7 +126,7 @@ export function normalizeJob(value: Record<string, unknown>): PrintJob {
     totalSlices,
     currentSlice,
     currentSliceTime: number(pick(value, ['currentSliceTime', 'sliceTime'], 0)),
-    averageSliceTime: number(pick(value, ['averageSliceTime', 'avgSliceTime', 'estimatedSliceTime'], 0)),
+    averageSliceTime: number(pick(value, ['averageSliceTime', 'avgSliceTime', 'estimatedSliceTime', 'lastNAverageSliceTime'], 0)),
     elapsedTime: number(pick(value, ['elapsedTime', 'elapsed'], 0)),
     progress: totalSlices > 0 ? Math.min(100, (currentSlice / totalSlices) * 100) : number(pick(value, ['progress', 'percentage'], 0)),
   }
