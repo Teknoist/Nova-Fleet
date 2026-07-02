@@ -9,6 +9,7 @@ import { PrinterStore } from './store.js'
 const __dirname = fileURLToPath(new URL('.', import.meta.url))
 const store = new PrinterStore()
 const client = new NovaClient()
+const hasSingleInstanceLock = app.requestSingleInstanceLock()
 
 function errorHtml(title: string, detail: string) {
   return `<!doctype html><html lang="tr"><head><meta charset="UTF-8"><title>Nova Fleet</title><style>
@@ -102,5 +103,16 @@ ipcMain.handle('files:choose-upload', async (event, id: string) => {
   } catch (error) { return result(error) }
 })
 
-app.whenReady().then(() => { createWindow(); app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow() }) })
+if (!hasSingleInstanceLock) {
+  app.quit()
+} else {
+  app.on('second-instance', () => {
+    const window = BrowserWindow.getAllWindows()[0]
+    if (!window) return
+    if (window.isMinimized()) window.restore()
+    window.show()
+    window.focus()
+  })
+  app.whenReady().then(() => { createWindow(); app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow() }) })
+}
 app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit() })

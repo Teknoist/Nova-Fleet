@@ -85,9 +85,13 @@ function App() {
   const averageProgress = printing ? snapshots.reduce((sum, item) => sum + (item.activeJob?.progress ?? 0), 0) / printing : 0
 
   async function runAction(action: () => Promise<{ ok: boolean; message?: string }>, refreshAfter = true) {
-    const response = await action()
-    toast(response.message ?? (response.ok ? 'İşlem tamamlandı.' : 'İşlem başarısız.'), response.ok ? 'success' : 'error')
-    if (response.ok && refreshAfter) await refresh(true)
+    try {
+      const response = await action()
+      toast(response.message ?? (response.ok ? 'İşlem tamamlandı.' : 'İşlem başarısız.'), response.ok ? 'success' : 'error')
+      if (response.ok && refreshAfter) await refresh(true)
+    } catch (error) {
+      toast(error instanceof Error ? error.message : 'İşlem başarısız.', 'error')
+    }
   }
 
   async function savePrinter(input: SavePrinterInput) {
@@ -114,7 +118,7 @@ function App() {
         <div className="sidebar-spacer" />
         <nav><NavItem active={view === 'settings'} icon={<Settings />} label="Ayarlar" onClick={() => setView('settings')} /></nav>
         <div className="network-card"><span className="pulse-dot" /><div><strong>Yerel ağ</strong><small>{online}/{snapshots.length} yazıcı erişilebilir</small></div></div>
-        <div className="sidebar-version">NOVA FLEET · v0.1.4</div>
+        <div className="sidebar-version">NOVA FLEET · v0.2.1</div>
       </aside>
 
       <main className="main">
@@ -136,6 +140,13 @@ function App() {
           </div>
         )}
       </main>
+      <nav className="mobile-nav" aria-label="Mobil menü">
+        <MobileNavItem active={view === 'overview'} icon={<LayoutDashboard />} label="Genel" onClick={() => setView('overview')} />
+        <MobileNavItem active={view === 'printers'} icon={<Printer />} label="Yazıcılar" onClick={() => setView('printers')} />
+        <MobileNavItem active={view === 'files'} icon={<FileBox />} label="Dosyalar" onClick={() => setView('files')} />
+        <MobileNavItem active={view === 'jobs'} icon={<Activity />} label="İşler" onClick={() => setView('jobs')} />
+        <MobileNavItem active={view === 'settings'} icon={<Settings />} label="Ayarlar" onClick={() => setView('settings')} />
+      </nav>
       {modal && <PrinterModal value={modal === 'new' ? undefined : modal} close={() => setModal(null)} save={savePrinter} />}
       {upload && upload.percent < 100 && <div className="upload-toast"><Upload size={18} /><div><strong>{upload.fileName}</strong><span>Yükleniyor · %{upload.percent}</span><div className="mini-progress"><i style={{ width: `${upload.percent}%` }} /></div></div></div>}
       <div className="toast-stack">{toasts.map((item) => <div className={`toast ${item.kind}`} key={item.id}>{item.kind === 'success' ? <Check /> : <AlertTriangle />}<span>{item.text}</span></div>)}</div>
@@ -145,6 +156,10 @@ function App() {
 
 function NavItem({ active, icon, label, count, onClick }: { active: boolean; icon: React.ReactNode; label: string; count?: number; onClick: () => void }) {
   return <button className={`nav-item ${active ? 'active' : ''}`} onClick={onClick}><span>{icon}</span>{label}{count !== undefined && <b>{count}</b>}</button>
+}
+
+function MobileNavItem({ active, icon, label, onClick }: { active: boolean; icon: React.ReactNode; label: string; onClick: () => void }) {
+  return <button className={active ? 'active' : ''} onClick={onClick}><span>{icon}</span><small>{label}</small></button>
 }
 
 function Overview({ snapshots, online, printing, queuedFiles, averageProgress, search, setSearch, setSelected, uploadFile }: { snapshots: PrinterSnapshot[]; online: number; printing: number; queuedFiles: number; averageProgress: number; search: string; setSearch: (v: string) => void; setSelected: (id: string) => void; uploadFile: (id: string) => void }) {
@@ -207,7 +222,13 @@ function PrinterModal({ value, close, save }: { value?: PrinterConfig; close: ()
   const [form, setForm] = useState(initial)
   const [saving, setSaving] = useState(false)
   const field = (key: keyof SavePrinterInput, next: string | number | boolean) => setForm((current) => ({ ...current, [key]: next }))
-  return <div className="modal-backdrop" onMouseDown={(e) => e.target === e.currentTarget && close()}><form className="modal" onSubmit={(e) => { e.preventDefault(); setSaving(true); void save(form).finally(() => setSaving(false)) }}><div className="modal-head"><div><p className="section-kicker">{value ? 'PROFİLİ DÜZENLE' : 'FİLOYA EKLE'}</p><h2>{value ? value.name : 'Yeni yazıcı'}</h2></div><button type="button" className="icon-button" onClick={close}><X /></button></div><div className="form-grid"><label className="full"><span>Görünen ad</span><input required value={form.name} onChange={(e) => field('name', e.target.value)} placeholder="Örn. Bene4" /></label><label><span>IP adresi / sunucu</span><input required value={form.host} onChange={(e) => field('host', e.target.value)} placeholder="192.168.0.125" /></label><label><span>Port</span><input type="number" min="1" max="65535" value={form.port} onChange={(e) => field('port', Number(e.target.value))} /></label><label><span>Model</span><select value={form.model} onChange={(e) => field('model', e.target.value)}><option>Nova3D Elfin</option><option>Nova3D Bene4</option><option>Nova3D Whale3</option><option>L3130-K40-</option><option>Diğer Nova3D</option></select></label><label><span>Konum</span><input value={form.location} onChange={(e) => field('location', e.target.value)} placeholder="Örn. Prototip Atölyesi" /></label><label className="full"><span>Sorgulama aralığı</span><div className="range-row"><input type="range" min="5" max="60" value={form.pollInterval} onChange={(e) => field('pollInterval', Number(e.target.value))} /><b>{form.pollInterval} sn</b></div><small>Eski firmware sürümlerinde 10 saniye veya üzeri önerilir.</small></label></div><div className="modal-footer"><button type="button" className="secondary-button" onClick={close}>Vazgeç</button><button className="primary-button" disabled={saving}>{saving && <LoaderCircle className="spin" />} {value ? 'Değişiklikleri kaydet' : 'Yazıcıyı ekle'}</button></div></form></div>
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => { if (event.key === 'Escape' && !saving) close() }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [close, saving])
+
+  return <div className="modal-backdrop" role="presentation" onClick={(e) => e.target === e.currentTarget && close()}><form className="modal" role="dialog" aria-modal="true" aria-labelledby="printer-modal-title" onSubmit={(e) => { e.preventDefault(); setSaving(true); void save(form).finally(() => setSaving(false)) }}><div className="modal-head"><div><p className="section-kicker">{value ? 'PROFİLİ DÜZENLE' : 'FİLOYA EKLE'}</p><h2 id="printer-modal-title">{value ? value.name : 'Yeni yazıcı'}</h2></div><button type="button" className="icon-button" aria-label="Pencereyi kapat" onClick={close}><X /></button></div><div className="form-grid"><label className="full"><span>Görünen ad</span><input autoFocus autoComplete="off" required value={form.name} onChange={(e) => field('name', e.target.value)} placeholder="Örn. Bene4" /></label><label><span>IP adresi / sunucu</span><input autoComplete="off" inputMode="url" required value={form.host} onChange={(e) => field('host', e.target.value)} placeholder="192.168.0.125" /></label><label><span>Port</span><input inputMode="numeric" type="number" min="1" max="65535" value={form.port} onChange={(e) => field('port', Number(e.target.value))} /></label><label><span>Model</span><select value={form.model} onChange={(e) => field('model', e.target.value)}><option>Nova3D Elfin</option><option>Nova3D Bene4</option><option>Nova3D Whale3</option><option>L3130-K40-</option><option>Diğer Nova3D</option></select></label><label><span>Konum</span><input autoComplete="off" value={form.location} onChange={(e) => field('location', e.target.value)} placeholder="Örn. Prototip Atölyesi" /></label><label className="full"><span>Sorgulama aralığı</span><div className="range-row"><input type="range" min="5" max="60" value={form.pollInterval} onChange={(e) => field('pollInterval', Number(e.target.value))} /><b>{form.pollInterval} sn</b></div><small>Eski firmware sürümlerinde 10 saniye veya üzeri önerilir.</small></label></div><div className="modal-footer"><button type="button" className="secondary-button" onClick={close}>Vazgeç</button><button className="primary-button" disabled={saving}>{saving && <LoaderCircle className="spin" />} {value ? 'Değişiklikleri kaydet' : 'Yazıcıyı ekle'}</button></div></form></div>
 }
 
 export default App

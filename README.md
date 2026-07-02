@@ -40,6 +40,19 @@ Uygulama henüz ticari kod imzalama sertifikasıyla imzalanmadığı için Windo
 - Sorunlu eski firmware sürümlerini koruyan sıralı HTTP istekleri
 - İnternet veya bulut hesabı gerektirmeyen yerel çalışma
 
+## Android uygulaması
+
+Android sürümü masaüstü sürümle aynı Nova3D işlevlerini sunar: çoklu yazıcı yönetimi, dosya listesi, `.cws` yükleme, silme, yazdırma, aktif iş takibi ve duraklat/sürdür/durdur kontrolleri.
+
+GitHub Actions her Android değişikliğinde kurulabilir debug APK üretir:
+
+1. Deponun **Actions** sayfasını açın.
+2. **Build Android APK** workflow'unu seçin.
+3. En güncel başarılı çalışmanın **Artifacts** bölümünden `Nova-Fleet-Android-<commit>` dosyasını indirin.
+4. Arşivdeki `app-debug.apk` dosyasını Android telefona aktarın ve kurun.
+
+Telefon ile yazıcıların aynı Wi-Fi ağına bağlı olması gerekir. Nova3D firmware yerel API'yi şifresiz HTTP üzerinden sunduğu için Android uygulaması yalnızca yerel ağdaki `:8081` bağlantılarına izin verir.
+
 ## Sorun giderme
 
 ### Yazıcı çevrimdışı görünüyor
@@ -85,6 +98,19 @@ Windows kurulum paketi:
 
 ```powershell
 npm run package:win
+```
+
+Android web varlıklarını ve yerel projeyi eşitlemek için:
+
+```powershell
+npm run android:sync
+```
+
+Android SDK kurulu bir geliştirme bilgisayarında debug APK:
+
+```powershell
+cd android
+.\gradlew.bat assembleDebug
 ```
 
 Çıktı `release/Nova-Fleet-Setup-<sürüm>.exe` olarak oluşturulur.
