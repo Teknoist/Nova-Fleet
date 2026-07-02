@@ -32,6 +32,17 @@ export interface PrintJob {
   averageSliceTime: number
   elapsedTime: number
   progress: number
+  beginPrintTime?: number
+  endPrintTime?: number
+  layerTime?: number
+  bottomLayersTime?: number
+  numberOfBottomLayers?: number
+  resinUsage?: number
+  totalCost?: number
+  totalExposureTime?: number
+  zliftDistance?: number
+  zliftSpeed?: number
+  errorDescription?: string
 }
 
 export interface PrinterSnapshot {
@@ -43,6 +54,7 @@ export interface PrinterSnapshot {
   files: NovaFile[]
   usedBytes: number
   activeJob?: PrintJob
+  recentJobs?: PrintJob[]
   lastSeen?: string
   error?: string
 }

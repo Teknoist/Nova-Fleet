@@ -228,9 +228,11 @@ public class NovaFleetPlugin extends Plugin {
             catch (Exception error) { jobError = error.getMessage(); }
 
             JSObject activeJob = null;
+            JSONArray recentJobs = new JSONArray();
             for (int i = 0; i < jobs.length(); i++) {
                 JSObject job = normalizeJob(jobs.getJSONObject(i));
-                if (job.getBoolean("printInProgress", false) || job.getBoolean("printPaused", false)) { activeJob = job; break; }
+                if (activeJob == null && (job.getBoolean("printInProgress", false) || job.getBoolean("printPaused", false))) activeJob = job;
+                else if (recentJobs.length() < 20) recentJobs.put(job);
             }
 
             JSObject metadata = metadataCache.get(source.optString("id"));
@@ -249,6 +251,7 @@ public class NovaFleetPlugin extends Plugin {
             String firmware = metadata.getString("firmware", null);
             if (firmware != null && !firmware.trim().isEmpty()) result.put("firmware", firmware);
             if (activeJob != null) result.put("activeJob", activeJob);
+            result.put("recentJobs", recentJobs);
             if (jobError != null) result.put("error", jobError);
             return result;
         } catch (Exception error) {
@@ -270,6 +273,17 @@ public class NovaFleetPlugin extends Plugin {
             .put("currentSliceTime", raw.optLong("currentSliceTime", 0))
             .put("averageSliceTime", raw.optLong("averageSliceTime", 0))
             .put("elapsedTime", raw.optLong("elapsedTime", 0))
+            .put("beginPrintTime", raw.optLong("beginPrintTime", 0))
+            .put("endPrintTime", raw.optLong("endPrintTime", 0))
+            .put("layerTime", raw.optLong("layerTime", 0))
+            .put("bottomLayersTime", raw.optLong("bottomLayersTime", 0))
+            .put("numberOfBottomLayers", raw.optInt("numberOfBottomLayers", 0))
+            .put("resinUsage", raw.optDouble("resinUsage", 0))
+            .put("totalCost", raw.optDouble("totalCost", 0))
+            .put("totalExposureTime", raw.optDouble("totalExposureTime", 0))
+            .put("zliftDistance", raw.optDouble("zliftDistance", 0))
+            .put("zliftSpeed", raw.optDouble("zliftSpeed", 0))
+            .put("errorDescription", raw.optString("errorDescription", ""))
             .put("progress", total > 0 ? Math.min(100d, (current * 100d) / total) : 0d);
     }
 
