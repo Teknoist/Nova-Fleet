@@ -118,7 +118,7 @@ function App() {
         <div className="sidebar-spacer" />
         <nav><NavItem active={view === 'settings'} icon={<Settings />} label="Ayarlar" onClick={() => setView('settings')} /></nav>
         <div className="network-card"><span className="pulse-dot" /><div><strong>Yerel ağ</strong><small>{online}/{snapshots.length} yazıcı erişilebilir</small></div></div>
-        <div className="sidebar-version">NOVA FLEET · v0.2.1</div>
+        <div className="sidebar-version">NOVA FLEET · v0.2.2</div>
       </aside>
 
       <main className="main">

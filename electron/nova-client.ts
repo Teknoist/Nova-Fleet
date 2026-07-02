@@ -11,7 +11,20 @@ type EndpointMode = 'nova8081' | 'services'
 
 function requestBuffer(url: URL, method = 'GET', timeout = 4500): Promise<Buffer> {
   return new Promise((resolve, reject) => {
-    const request = (url.protocol === 'https:' ? httpsRequest : httpRequest)(url, { method, timeout }, (response) => {
+    const request = (url.protocol === 'https:' ? httpsRequest : httpRequest)(url, {
+      method,
+      timeout,
+      agent: false,
+      family: 4,
+      insecureHTTPParser: true,
+      joinDuplicateHeaders: true,
+      headers: {
+        Accept: 'application/json, text/plain, */*',
+        'Accept-Encoding': 'identity',
+        Connection: 'close',
+        'User-Agent': 'Nova-Fleet/0.2.2',
+      },
+    }, (response) => {
       const chunks: Buffer[] = []
       response.on('data', (chunk) => chunks.push(Buffer.from(chunk)))
       response.on('end', () => {
@@ -28,7 +41,7 @@ function requestBuffer(url: URL, method = 'GET', timeout = 4500): Promise<Buffer
 }
 
 function text(buffer: Buffer) {
-  return buffer.toString('utf8').trim()
+  return buffer.toString('utf8').replace(/^\uFEFF/u, '').replace(/\0+$/u, '').trim()
 }
 
 function parseJsonArray(buffer: Buffer, label: string): Record<string, unknown>[] {
@@ -167,6 +180,7 @@ export class NovaClient {
     try {
       const fileResult = await this.requestFirst([
         { url: this.url(printer, '/file/list'), mode: 'nova8081' },
+        { url: this.url(printer, '/file/list/'), mode: 'nova8081' },
         ...this.serviceUrls(printer, '/services/printables/list').map((url) => ({ url, mode: 'services' as EndpointMode })),
       ], 'GET', 7000)
       const files = parseJsonArray(fileResult.body, 'Dosya listesi').map(normalizeFile)
