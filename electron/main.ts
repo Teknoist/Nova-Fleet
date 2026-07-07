@@ -1,15 +1,41 @@
-import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron'
+import { app, BrowserWindow, dialog, ipcMain, Notification, shell } from 'electron'
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import type { SavePrinterInput } from '../src/shared/types.js'
 import { NovaClient } from './nova-client.js'
+import { PrintCompletionTracker } from './print-completion.js'
 import { PrinterStore } from './store.js'
 
 const __dirname = fileURLToPath(new URL('.', import.meta.url))
 const store = new PrinterStore()
 const client = new NovaClient()
+const completionTracker = new PrintCompletionTracker()
 const hasSingleInstanceLock = app.requestSingleInstanceLock()
+let mainWindow: BrowserWindow | undefined
+
+function focusMainWindow() {
+  if (!mainWindow || mainWindow.isDestroyed()) return
+  if (mainWindow.isMinimized()) mainWindow.restore()
+  mainWindow.show()
+  mainWindow.focus()
+}
+
+function observePrintCompletion(snapshot: Awaited<ReturnType<NovaClient['snapshot']>>) {
+  const completed = completionTracker.observe(snapshot)
+  if (!completed || !Notification.isSupported()) return
+  const english = !app.getLocale().toLowerCase().startsWith('tr')
+  shell.beep()
+  const notification = new Notification({
+    title: english ? 'Print completed' : 'Baskı tamamlandı',
+    body: english
+      ? `${completed.jobName} finished on ${completed.printerName}.`
+      : `${completed.jobName}, ${completed.printerName} üzerinde tamamlandı.`,
+    silent: true,
+  })
+  notification.on('click', focusMainWindow)
+  notification.show()
+}
 
 function errorHtml(title: string, detail: string) {
   return `<!doctype html><html lang="tr"><head><meta charset="UTF-8"><title>Nova Fleet</title><style>
@@ -64,6 +90,8 @@ function createWindow() {
       sandbox: false,
     },
   })
+  mainWindow = window
+  window.on('closed', () => { if (mainWindow === window) mainWindow = undefined })
   window.once('ready-to-show', () => window.show())
   window.webContents.setWindowOpenHandler(({ url }) => { void shell.openExternal(url); return { action: 'deny' } })
   void loadRenderer(window).catch((error) => {
@@ -79,8 +107,16 @@ function result(error: unknown) {
 ipcMain.handle('printers:list', () => store.list())
 ipcMain.handle('printers:save', (_event, input: SavePrinterInput) => store.save(input))
 ipcMain.handle('printers:remove', async (_event, id: string) => { try { await store.remove(id); return { ok: true } } catch (error) { return result(error) } })
-ipcMain.handle('printers:refresh', async (_event, id: string) => client.snapshot(await store.get(id)))
-ipcMain.handle('printers:refresh-all', async () => Promise.all((await store.list()).filter((printer) => printer.enabled).map((printer) => client.snapshot(printer))))
+ipcMain.handle('printers:refresh', async (_event, id: string) => {
+  const snapshot = await client.snapshot(await store.get(id))
+  observePrintCompletion(snapshot)
+  return snapshot
+})
+ipcMain.handle('printers:refresh-all', async () => {
+  const snapshots = await Promise.all((await store.list()).filter((printer) => printer.enabled).map((printer) => client.snapshot(printer)))
+  snapshots.forEach(observePrintCompletion)
+  return snapshots
+})
 ipcMain.handle('files:delete', async (_event, id: string, fileName: string) => {
   try { await client.command(await store.get(id), `/file/delete/${encodeURIComponent(fileName)}`); return { ok: true, message: 'Dosya silindi.' } }
   catch (error) { return result(error) }
@@ -107,12 +143,12 @@ if (!hasSingleInstanceLock) {
   app.quit()
 } else {
   app.on('second-instance', () => {
-    const window = BrowserWindow.getAllWindows()[0]
-    if (!window) return
-    if (window.isMinimized()) window.restore()
-    window.show()
-    window.focus()
+    focusMainWindow()
   })
-  app.whenReady().then(() => { createWindow(); app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow() }) })
+  app.whenReady().then(() => {
+    if (process.platform === 'win32') app.setAppUserModelId('com.novafleet.desktop')
+    createWindow()
+    app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow() })
+  })
 }
 app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit() })
