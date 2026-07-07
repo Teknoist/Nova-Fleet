@@ -44,6 +44,10 @@ function text(buffer: Buffer) {
   return buffer.toString('utf8').replace(/^\uFEFF/u, '').replace(/\0+$/u, '').trim()
 }
 
+function delay(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
 function parseJsonArray(buffer: Buffer, label: string): Record<string, unknown>[] {
   const raw = text(buffer)
   const data = JSON.parse(raw)
@@ -281,9 +285,38 @@ export class NovaClient {
         return
       } catch (error) {
         errors.push(`${url.pathname}: ${error instanceof Error ? error.message : String(error)}`)
+        if (await this.uploadAppearsComplete(printer, fileName)) {
+          onProgress(100)
+          return
+        }
       }
     }
+    if (await this.uploadAppearsComplete(printer, fileName)) {
+      onProgress(100)
+      return
+    }
     throw new Error(errors.join(' | ') || 'Yükleme başarısız.')
+  }
+
+  private async uploadAppearsComplete(printer: PrinterConfig, fileName: string) {
+    for (const waitMs of [800, 2000]) {
+      await delay(waitMs)
+      try {
+        const result = await this.requestFirst([
+          { url: this.url(printer, '/file/list'), mode: 'nova8081' },
+          { url: this.url(printer, '/file/list/'), mode: 'nova8081' },
+          ...this.serviceUrls(printer, '/services/printables/list').map((url) => ({ url, mode: 'services' as EndpointMode })),
+        ], 'GET', 7000)
+        const expected = fileName.toLowerCase()
+        const found = parseJsonArray(result.body, 'Dosya listesi')
+          .map(normalizeFile)
+          .some((file) => file.fullName.toLowerCase() === expected || `${file.name}.${file.extension}`.toLowerCase() === expected)
+        if (found) return true
+      } catch {
+        /* Yazıcı upload sonrası kısa süre meşgul kalabiliyor; tekrar dene. */
+      }
+    }
+    return false
   }
 
   private async uploadTo(url: URL, filePath: string, fileSize: number, onProgress: (percent: number) => void) {
