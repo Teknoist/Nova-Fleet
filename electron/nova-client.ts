@@ -1,13 +1,33 @@
 import { createReadStream } from 'node:fs'
 import { stat } from 'node:fs/promises'
+import { randomUUID } from 'node:crypto'
+import { createSocket } from 'node:dgram'
 import { request as httpRequest } from 'node:http'
 import { request as httpsRequest } from 'node:https'
 import { basename } from 'node:path'
+import WebSocket from 'ws'
 import type { NovaFile, PrintJob, PrinterConfig, PrinterSnapshot } from '../src/shared/types.js'
 
 const demoStartedAt = Date.now() - 52 * 60 * 1000
 
 type EndpointMode = 'nova8081' | 'services' | 'sdcp3'
+
+interface SdcpDiscoveryDevice {
+  Id?: string
+  Data?: {
+    Name?: string
+    MainboardIP?: string
+    MainboardID?: string
+    [key: string]: unknown
+  }
+  [key: string]: unknown
+}
+
+interface SdcpStatusResponse {
+  Status?: Record<string, unknown>
+  Data?: Record<string, unknown>
+  [key: string]: unknown
+}
 
 function requestBuffer(url: URL, method = 'GET', timeout = 4500): Promise<Buffer> {
   return new Promise((resolve, reject) => {
@@ -184,6 +204,63 @@ function stateFromSdcp(value: Record<string, unknown>) {
   return 'online' as const
 }
 
+function parseJsonObjectText(raw: string): Record<string, unknown> | undefined {
+  try {
+    const data = JSON.parse(raw.trim())
+    return data && typeof data === 'object' && !Array.isArray(data) ? data as Record<string, unknown> : undefined
+  } catch {
+    return undefined
+  }
+}
+
+function sdcpStatusCode(value: unknown) {
+  if (Array.isArray(value)) return number(value[0])
+  return number(value)
+}
+
+function sdcpStateFromCode(code: number) {
+  if (code === 2) return 'printing' as const
+  if (code >= 64) return 'error' as const
+  return 'online' as const
+}
+
+function sdcpStatusText(code: number) {
+  const map: Record<number, string> = {
+    0: 'idle',
+    1: 'homing',
+    2: 'printing',
+    4: 'file_checking',
+  }
+  return map[code] ?? `sdcp_status_${code}`
+}
+
+function normalizeSdcpJob(status: Record<string, unknown>, deviceId: string): PrintJob | undefined {
+  const printInfo = nestedObject(status.PrintInfo) ?? nestedObject(status.printInfo)
+  if (!printInfo) return undefined
+  const statusCode = sdcpStatusCode(pick(status, ['CurrentStatus', 'currentStatus', 'Status'], 0))
+  const currentSlice = number(pick(printInfo, ['CurrentLayer', 'currentLayer', 'CurrentSlice'], 0))
+  const totalSlices = number(pick(printInfo, ['TotalLayer', 'totalLayer', 'TotalSlices'], 0))
+  const currentTicks = number(pick(printInfo, ['CurrentTicks', 'currentTicks', 'ElapsedTime'], 0))
+  const totalTicks = number(pick(printInfo, ['TotalTicks', 'totalTicks'], 0))
+  const progress = totalSlices > 0
+    ? Math.min(100, (currentSlice / totalSlices) * 100)
+    : totalTicks > 0 ? Math.min(100, (currentTicks / totalTicks) * 100) : 0
+  return {
+    id: string(pick(printInfo, ['TaskId', 'taskId', 'Id', 'id'], deviceId || 'sdcp-current-job')),
+    jobName: string(pick(printInfo, ['Filename', 'FileName', 'filename', 'Name'], 'SDCP print')),
+    printInProgress: statusCode === 2,
+    printPaused: false,
+    status: sdcpStatusText(statusCode),
+    thickness: number(pick(printInfo, ['LayerHeight', 'layerHeight', 'Thickness'], 0)),
+    totalSlices,
+    currentSlice,
+    currentSliceTime: 0,
+    averageSliceTime: totalSlices > 0 && totalTicks > 0 ? Math.round(totalTicks / totalSlices) : 0,
+    elapsedTime: currentTicks,
+    progress,
+  }
+}
+
 const demoFiles: NovaFile[] = [
   { name: 'gearbox_v12', extension: 'cws', size: 48_890_112, modifiedDate: '2026-06-30T09:42:00', fullName: 'gearbox_v12.cws' },
   { name: 'enclosure-final', extension: 'cws', size: 72_241_152, modifiedDate: '2026-06-29T16:18:00', fullName: 'enclosure-final.cws' },
@@ -276,6 +353,143 @@ export class NovaClient {
   }
 
   private async sdcpSnapshot(printer: PrinterConfig): Promise<PrinterSnapshot> {
+    const started = performance.now()
+    try {
+      const address = cleanAddress(printer)
+      const device = await this.discoverSdcpDevice(address.host)
+      const deviceData = device.Data ?? {}
+      const mainboardId = string(deviceData.MainboardID, '')
+      const deviceIp = string(deviceData.MainboardIP, address.host) || address.host
+      const deviceId = string(device.Id, mainboardId || address.host)
+      const status = await this.requestSdcpStatus(deviceId, mainboardId, deviceIp, address.port || 3030)
+      const statusCode = sdcpStatusCode(pick(status, ['CurrentStatus', 'currentStatus', 'Status'], 0))
+      const activeJob = normalizeSdcpJob(status, deviceId)
+      const files: NovaFile[] = []
+      return {
+        config: { ...printer, model: string(deviceData.Name, printer.model || 'SDCP 3.0') },
+        state: activeJob?.printPaused ? 'paused' : activeJob?.printInProgress ? 'printing' : sdcpStateFromCode(statusCode),
+        latency: Math.round(performance.now() - started),
+        firmware: string(pick(status, ['FirmwareVersion', 'firmwareVersion', 'Version'], '')) || undefined,
+        printerInfo: `API: SDCP 3.0 WebSocket (${deviceIp}:3030)`,
+        files,
+        usedBytes: 0,
+        activeJob,
+        recentJobs: [],
+        lastSeen: new Date().toISOString(),
+      }
+    } catch (error) {
+      return { config: printer, state: 'offline', files: [], usedBytes: 0, error: error instanceof Error ? error.message : 'SDCP 3.0 bağlantısı kurulamadı.' }
+    }
+  }
+
+  private async discoverSdcpDevice(host: string): Promise<SdcpDiscoveryDevice> {
+    return new Promise((resolve, reject) => {
+      const socket = createSocket('udp4')
+      const devices: Array<{ device: SdcpDiscoveryDevice; source: string }> = []
+      let settled = false
+      const finish = () => {
+        if (settled) return
+        settled = true
+        socket.close()
+        const exact = devices.find((item) => item.source === host || item.device.Data?.MainboardIP === host)
+        const selected = exact ?? (devices.length === 1 ? devices[0] : undefined)
+        if (selected) resolve(selected.device)
+        else reject(new Error('SDCP keşif yanıtı alınamadı. Windows Güvenlik Duvarı UDP 3000 ve TCP 3030 izinlerini kontrol et.'))
+      }
+      const timer = setTimeout(finish, 2200)
+      socket.on('error', (error) => {
+        clearTimeout(timer)
+        if (!settled) {
+          settled = true
+          socket.close()
+          reject(error)
+        }
+      })
+      socket.on('message', (message, remote) => {
+        const parsed = parseJsonObjectText(message.toString('utf8'))
+        if (parsed?.Data && typeof parsed.Data === 'object') {
+          devices.push({ device: parsed as SdcpDiscoveryDevice, source: remote.address })
+          if (remote.address === host || (parsed as SdcpDiscoveryDevice).Data?.MainboardIP === host) {
+            clearTimeout(timer)
+            finish()
+          }
+        }
+      })
+      socket.bind(0, '0.0.0.0', () => {
+        socket.setBroadcast(true)
+        const payload = Buffer.from('M99999')
+        socket.send(payload, 3000, '255.255.255.255')
+        socket.send(payload, 3000, host)
+      })
+    })
+  }
+
+  private async requestSdcpStatus(deviceId: string, mainboardId: string, host: string, port: number): Promise<Record<string, unknown>> {
+    return new Promise((resolve, reject) => {
+      const url = `ws://${host}:${port || 3030}/websocket`
+      const socket = new WebSocket(url)
+      let settled = false
+      let pollTimer: ReturnType<typeof setInterval> | undefined
+      const cleanup = () => {
+        if (pollTimer) clearInterval(pollTimer)
+        socket.close()
+      }
+      const failTimer = setTimeout(() => {
+        if (!settled) {
+          settled = true
+          cleanup()
+          reject(new Error(`SDCP WebSocket durum yanıtı gelmedi: ${url}`))
+        }
+      }, 5500)
+      const sendStatusRequest = () => {
+        if (socket.readyState !== WebSocket.OPEN) return
+        socket.send(JSON.stringify({
+          Id: deviceId,
+          Data: {
+            Cmd: 0,
+            Data: {},
+            RequestID: randomUUID().replaceAll('-', ''),
+            MainboardID: mainboardId,
+            TimeStamp: Math.floor(Date.now() / 1000),
+            From: 0,
+          },
+          Topic: `sdcp/request/${mainboardId}`,
+        }))
+      }
+      socket.on('open', () => {
+        sendStatusRequest()
+        pollTimer = setInterval(sendStatusRequest, 1000)
+      })
+      socket.on('message', (data) => {
+        const parsed = parseJsonObjectText(data.toString())
+        const status = nestedObject(parsed?.Status) ?? nestedObject((parsed as SdcpStatusResponse | undefined)?.Data?.Status)
+        if (status && !settled) {
+          settled = true
+          clearTimeout(failTimer)
+          cleanup()
+          resolve(status)
+        }
+      })
+      socket.on('error', (error) => {
+        if (!settled) {
+          settled = true
+          clearTimeout(failTimer)
+          cleanup()
+          reject(error)
+        }
+      })
+      socket.on('close', () => {
+        if (!settled) {
+          settled = true
+          clearTimeout(failTimer)
+          cleanup()
+          reject(new Error(`SDCP WebSocket kapandı: ${url}`))
+        }
+      })
+    })
+  }
+
+  private async legacyHttpSdcpSnapshot(printer: PrinterConfig): Promise<PrinterSnapshot> {
     const started = performance.now()
     try {
       const statusResult = await this.requestFirst(this.sdcpUrls(printer, [
