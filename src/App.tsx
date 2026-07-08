@@ -1457,7 +1457,12 @@ function PrinterModal({
     setForm((current) => ({
       ...current,
       protocol,
-      port: protocol === "sdcp3" && current.port === 8081 ? 3030 : current.port,
+      port:
+        protocol === "sdcp3" && current.port === 8081
+          ? 3030
+          : protocol === "nova" && current.port === 3030
+            ? 8081
+            : current.port,
     }));
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -1549,8 +1554,8 @@ function PrinterModal({
             </select>
             <small>
               {tr(
-                "SDCP 3.0 iÃ§in portu yazÄ±cÄ±nÄ±n aÄŸ ayarlarÄ±ndaki servis portu ile eÅŸleÅŸtirin.",
-                "For SDCP 3.0, match the port with the service port shown in the printer network settings.",
+                "Nova varsayÄ±lanÄ± 8081, SDCP 3.0 varsayÄ±lanÄ± 3030. Ã–zel port yazarsan protokol deÄŸiÅŸiminde korunur.",
+                "Nova defaults to 8081, SDCP 3.0 defaults to 3030. Custom ports are preserved when switching protocol.",
               )}
             </small>
           </label>

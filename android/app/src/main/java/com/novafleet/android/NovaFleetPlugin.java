@@ -213,7 +213,6 @@ public class NovaFleetPlugin extends Plugin {
         String host = source.optString("host");
         if (host.startsWith("demo-")) return demoSnapshot(config);
         if ("sdcp3".equals(source.optString("protocol", "nova"))) return sdcpSnapshot(source);
-        if ("sdcp3".equals(source.optString("protocol", "nova"))) return sdcpSnapshot(source);
         long started = System.currentTimeMillis();
         try {
             JSONArray rawFiles = new JSONArray(request(source, "/file/list", 7000));
