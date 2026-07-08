@@ -261,6 +261,34 @@ function normalizeSdcpJob(status: Record<string, unknown>, deviceId: string): Pr
   }
 }
 
+function normalizeSdcpFile(value: Record<string, unknown>): NovaFile | undefined {
+  const fileType = pick(value, ['type', 'Type'], undefined)
+  if (fileType !== undefined && number(fileType) === 0) return undefined
+  const rawPath = string(pick(value, ['name', 'Name', 'path', 'Path', 'Url', 'url'], ''))
+  if (!rawPath) return undefined
+  const fullName = rawPath.split('/').filter(Boolean).pop() ?? rawPath
+  const dotIndex = fullName.lastIndexOf('.')
+  const extension = dotIndex > -1 ? fullName.slice(dotIndex + 1) : string(pick(value, ['extension', 'Extension'], ''))
+  const name = dotIndex > -1 ? fullName.slice(0, dotIndex) : fullName
+  return {
+    name,
+    extension,
+    size: number(pick(value, ['usedSize', 'UsedSize', 'size', 'Size', 'fileSize', 'FileSize'], 0)),
+    modifiedDate: string(pick(value, ['modifiedDate', 'ModifiedDate', 'lastModified', 'LastModified', 'date', 'Date'], '')),
+    fullName,
+  }
+}
+
+function uniqueFiles(files: NovaFile[]) {
+  const seen = new Set<string>()
+  return files.filter((file) => {
+    const key = `${file.fullName.toLowerCase()}:${file.size}`
+    if (seen.has(key)) return false
+    seen.add(key)
+    return true
+  })
+}
+
 const demoFiles: NovaFile[] = [
   { name: 'gearbox_v12', extension: 'cws', size: 48_890_112, modifiedDate: '2026-06-30T09:42:00', fullName: 'gearbox_v12.cws' },
   { name: 'enclosure-final', extension: 'cws', size: 72_241_152, modifiedDate: '2026-06-29T16:18:00', fullName: 'enclosure-final.cws' },
@@ -364,7 +392,13 @@ export class NovaClient {
       const status = await this.requestSdcpStatus(deviceId, mainboardId, deviceIp, address.port || 3030)
       const statusCode = sdcpStatusCode(pick(status, ['CurrentStatus', 'currentStatus', 'Status'], 0))
       const activeJob = normalizeSdcpJob(status, deviceId)
-      const files: NovaFile[] = []
+      let files: NovaFile[] = []
+      let fileError = ''
+      try {
+        files = await this.listSdcpFiles(deviceId, mainboardId, deviceIp, address.port || 3030)
+      } catch (error) {
+        fileError = error instanceof Error ? error.message : 'SDCP dosya listesi alınamadı.'
+      }
       return {
         config: { ...printer, model: string(deviceData.Name, printer.model || 'SDCP 3.0') },
         state: activeJob?.printPaused ? 'paused' : activeJob?.printInProgress ? 'printing' : sdcpStateFromCode(statusCode),
@@ -372,9 +406,10 @@ export class NovaClient {
         firmware: string(pick(status, ['FirmwareVersion', 'firmwareVersion', 'Version'], '')) || undefined,
         printerInfo: `API: SDCP 3.0 WebSocket (${deviceIp}:3030)`,
         files,
-        usedBytes: 0,
+        usedBytes: files.reduce((sum, file) => sum + file.size, 0),
         activeJob,
         recentJobs: [],
+        error: fileError || undefined,
         lastSeen: new Date().toISOString(),
       }
     } catch (error) {
@@ -420,6 +455,106 @@ export class NovaClient {
         const payload = Buffer.from('M99999')
         socket.send(payload, 3000, '255.255.255.255')
         socket.send(payload, 3000, host)
+      })
+    })
+  }
+
+  private async listSdcpFiles(deviceId: string, mainboardId: string, host: string, port: number): Promise<NovaFile[]> {
+    const paths = ['/local/', '/usb/', '/local', '/usb', '/']
+    const files: NovaFile[] = []
+    const errors: string[] = []
+    for (const path of paths) {
+      try {
+        const result = await this.requestSdcpCommand(deviceId, mainboardId, host, port, 258, { Url: path }, `dosya listesi ${path}`)
+        const list = pick(result, ['FileList', 'fileList', 'Files', 'files'], [])
+        if (Array.isArray(list)) {
+          for (const item of list) {
+            const object = nestedObject(item)
+            const file = object ? normalizeSdcpFile(object) : undefined
+            if (file) files.push(file)
+          }
+        }
+      } catch (error) {
+        errors.push(`${path}: ${error instanceof Error ? error.message : String(error)}`)
+      }
+    }
+    const unique = uniqueFiles(files)
+    if (unique.length > 0) return unique
+    if (errors.length > 0) throw new Error(`SDCP dosya listesi alınamadı: ${errors.join(' | ')}`)
+    return []
+  }
+
+  private async requestSdcpCommand(
+    deviceId: string,
+    mainboardId: string,
+    host: string,
+    port: number,
+    command: number,
+    payload: Record<string, unknown>,
+    label: string,
+  ): Promise<Record<string, unknown>> {
+    return new Promise((resolve, reject) => {
+      const url = `ws://${host}:${port || 3030}/websocket`
+      const socket = new WebSocket(url)
+      let settled = false
+      const requestId = randomUUID().replaceAll('-', '')
+      const cleanup = () => socket.close()
+      const failTimer = setTimeout(() => {
+        if (!settled) {
+          settled = true
+          cleanup()
+          reject(new Error(`SDCP ${label} yanıtı gelmedi: ${url}`))
+        }
+      }, 6500)
+      const finish = (result: Record<string, unknown>) => {
+        if (settled) return
+        settled = true
+        clearTimeout(failTimer)
+        cleanup()
+        resolve(result)
+      }
+      const fail = (error: Error) => {
+        if (settled) return
+        settled = true
+        clearTimeout(failTimer)
+        cleanup()
+        reject(error)
+      }
+      socket.on('open', () => {
+        socket.send(JSON.stringify({
+          Id: deviceId,
+          Data: {
+            Cmd: command,
+            Data: payload,
+            RequestID: requestId,
+            MainboardID: mainboardId,
+            TimeStamp: Math.floor(Date.now() / 1000),
+            From: 0,
+          },
+          Topic: `sdcp/request/${mainboardId}`,
+        }))
+      })
+      socket.on('message', (data) => {
+        const parsed = parseJsonObjectText(data.toString())
+        const envelope = nestedObject(parsed?.Data)
+        if (!envelope) return
+        const responseCmd = number(envelope.Cmd)
+        const responseRequestId = string(envelope.RequestID, '')
+        if (responseCmd !== command) return
+        if (responseRequestId && responseRequestId !== requestId) return
+        const responseData = nestedObject(envelope.Data) ?? envelope
+        const ack = pick(responseData, ['Ack', 'ack'], undefined)
+        if (ack !== undefined && number(ack) !== 0) {
+          fail(new Error(`SDCP ${label} Ack=${number(ack)}`))
+          return
+        }
+        finish(responseData)
+      })
+      socket.on('error', (error) => {
+        fail(error)
+      })
+      socket.on('close', () => {
+        fail(new Error(`SDCP ${label} bağlantısı kapandı: ${url}`))
       })
     })
   }
