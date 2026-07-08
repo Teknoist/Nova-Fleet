@@ -38,6 +38,8 @@ import java.util.concurrent.Executors;
 import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
+import org.json.JSONTokener;
+import org.json.JSONTokener;
 
 @CapacitorPlugin(
     name = "NovaFleet",
@@ -98,6 +100,8 @@ public class NovaFleetPlugin extends Plugin {
                 .put("name", value(call.getString("name"), "İsimsiz yazıcı").trim())
                 .put("host", rawHost)
                 .put("port", port)
+                .put("protocol", value(call.getString("protocol"), "nova"))
+                .put("protocol", value(call.getString("protocol"), "nova"))
                 .put("model", value(call.getString("model"), "Nova3D Bene4"))
                 .put("location", value(call.getString("location"), ""))
                 .put("pollInterval", Math.max(5, value(call.getInt("pollInterval"), 10)))
@@ -198,6 +202,7 @@ public class NovaFleetPlugin extends Plugin {
     private void command(PluginCall call, String path, String message) {
         async(call, () -> {
             JSONObject printer = findPrinter(required(call, "id"));
+            if ("sdcp3".equals(printer.optString("protocol", "nova"))) throw new IOException("SDCP 3.0 yazÄ±cÄ±larda dosya/iş komutları henüz etkin değil; bağlantı ve durum izleme desteklenir.");
             if (!printer.optString("host").startsWith("demo-")) request(printer, path, 10000);
             return ok(message);
         });
@@ -207,6 +212,8 @@ public class NovaFleetPlugin extends Plugin {
         JSObject config = new JSObject(source.toString());
         String host = source.optString("host");
         if (host.startsWith("demo-")) return demoSnapshot(config);
+        if ("sdcp3".equals(source.optString("protocol", "nova"))) return sdcpSnapshot(source);
+        if ("sdcp3".equals(source.optString("protocol", "nova"))) return sdcpSnapshot(source);
         long started = System.currentTimeMillis();
         try {
             JSONArray rawFiles = new JSONArray(request(source, "/file/list", 7000));
@@ -259,6 +266,158 @@ public class NovaFleetPlugin extends Plugin {
         }
     }
 
+    private JSObject sdcpSnapshot(JSONObject source) throws Exception {
+        JSObject config = new JSObject(source.toString());
+        long started = System.currentTimeMillis();
+        try {
+            JSONObject status = unwrap(new JSONObject(requestAny(source, new String[] {
+                "/api/v1/status",
+                "/api/v1/printer/status",
+                "/api/v1/device/status",
+                "/sdcp/status",
+                "/printer/status",
+                "/status"
+            }, 7000)));
+            JSONArray files = new JSONArray();
+            long usedBytes = 0;
+            String detailError = null;
+            try {
+                JSONArray rawFiles = parseArray(requestAny(source, new String[] {
+                    "/api/v1/files",
+                    "/api/v1/printables",
+                    "/sdcp/files",
+                    "/files"
+                }, 4500));
+                for (int i = 0; i < rawFiles.length(); i++) {
+                    JSONObject raw = rawFiles.getJSONObject(i);
+                    String name = firstOr(raw, "", "name", "fileName", "filename", "printableName", "path");
+                    String extension = firstOr(raw, "", "extension", "type", "fileType").replaceFirst("^\\.", "");
+                    String fullName = extension.isEmpty() || name.toLowerCase(Locale.ROOT).endsWith("." + extension.toLowerCase(Locale.ROOT)) ? name : name + "." + extension;
+                    long size = raw.optLong("size", raw.optLong("fileSize", raw.optLong("bytes", 0)));
+                    usedBytes += size;
+                    files.put(new JSObject().put("name", name).put("extension", extension).put("size", size).put("modifiedDate", firstOr(raw, "", "modifiedDate", "modified", "lastModified", "date")).put("fullName", fullName));
+                }
+            } catch (Exception error) {
+                detailError = error.getMessage();
+            }
+
+            JSONArray jobs = new JSONArray();
+            try {
+                jobs = parseArray(requestAny(source, new String[] {
+                    "/api/v1/jobs",
+                    "/api/v1/print/status",
+                    "/api/v1/printJobs",
+                    "/sdcp/jobs",
+                    "/jobs"
+                }, 4500));
+            } catch (Exception ignored) {
+                JSONObject job = status.optJSONObject("job");
+                if (job == null) job = status.optJSONObject("printJob");
+                if (job == null) job = status.optJSONObject("currentJob");
+                if (job != null) jobs.put(job);
+            }
+
+            JSObject activeJob = null;
+            JSONArray recentJobs = new JSONArray();
+            for (int i = 0; i < jobs.length(); i++) {
+                JSObject job = normalizeJob(jobs.getJSONObject(i));
+                if (activeJob == null && (job.getBoolean("printInProgress", false) || job.getBoolean("printPaused", false))) activeJob = job;
+                else if (recentJobs.length() < 20) recentJobs.put(job);
+            }
+
+            String model = firstOr(status, value(source.optString("model"), "SDCP 3.0"), "model", "machineName", "printerName", "name");
+            config.put("model", model);
+            String state = activeJob != null && activeJob.getBoolean("printPaused", false) ? "paused" : activeJob != null && activeJob.getBoolean("printInProgress", false) ? "printing" : sdcpState(status);
+            JSObject result = new JSObject()
+                .put("config", config).put("state", state).put("latency", System.currentTimeMillis() - started)
+                .put("printerInfo", "API: SDCP 3.0").put("files", files).put("usedBytes", usedBytes).put("lastSeen", nowIso())
+                .put("recentJobs", recentJobs);
+            String firmware = firstOr(status, "", "firmware", "firmwareVersion", "version");
+            if (!firmware.trim().isEmpty()) result.put("firmware", firmware);
+            if (activeJob != null) result.put("activeJob", activeJob);
+            if (detailError != null) result.put("error", detailError);
+            return result;
+        } catch (Exception error) {
+            return new JSObject().put("config", config).put("state", "offline").put("files", new JSONArray()).put("usedBytes", 0).put("error", message(error));
+        }
+    }
+
+    private JSObject sdcpSnapshot(JSONObject source) throws Exception {
+        JSObject config = new JSObject(source.toString());
+        long started = System.currentTimeMillis();
+        try {
+            JSONObject status = unwrap(new JSONObject(requestAny(source, new String[] {
+                "/api/v1/status",
+                "/api/v1/printer/status",
+                "/api/v1/device/status",
+                "/sdcp/status",
+                "/printer/status",
+                "/status"
+            }, 7000)));
+            JSONArray files = new JSONArray();
+            long usedBytes = 0;
+            String detailError = null;
+            try {
+                JSONArray rawFiles = parseArray(requestAny(source, new String[] {
+                    "/api/v1/files",
+                    "/api/v1/printables",
+                    "/sdcp/files",
+                    "/files"
+                }, 4500));
+                for (int i = 0; i < rawFiles.length(); i++) {
+                    JSONObject raw = rawFiles.getJSONObject(i);
+                    String name = firstOr(raw, "", "name", "fileName", "filename", "printableName", "path");
+                    String extension = firstOr(raw, "", "extension", "type", "fileType").replaceFirst("^\\.", "");
+                    String fullName = extension.isEmpty() || name.toLowerCase(Locale.ROOT).endsWith("." + extension.toLowerCase(Locale.ROOT)) ? name : name + "." + extension;
+                    long size = raw.optLong("size", raw.optLong("fileSize", raw.optLong("bytes", 0)));
+                    usedBytes += size;
+                    files.put(new JSObject().put("name", name).put("extension", extension).put("size", size).put("modifiedDate", firstOr(raw, "", "modifiedDate", "modified", "lastModified", "date")).put("fullName", fullName));
+                }
+            } catch (Exception error) {
+                detailError = error.getMessage();
+            }
+
+            JSONArray jobs = new JSONArray();
+            try {
+                jobs = parseArray(requestAny(source, new String[] {
+                    "/api/v1/jobs",
+                    "/api/v1/print/status",
+                    "/api/v1/printJobs",
+                    "/sdcp/jobs",
+                    "/jobs"
+                }, 4500));
+            } catch (Exception ignored) {
+                JSONObject job = status.optJSONObject("job");
+                if (job == null) job = status.optJSONObject("printJob");
+                if (job == null) job = status.optJSONObject("currentJob");
+                if (job != null) jobs.put(job);
+            }
+
+            JSObject activeJob = null;
+            JSONArray recentJobs = new JSONArray();
+            for (int i = 0; i < jobs.length(); i++) {
+                JSObject job = normalizeJob(jobs.getJSONObject(i));
+                if (activeJob == null && (job.getBoolean("printInProgress", false) || job.getBoolean("printPaused", false))) activeJob = job;
+                else if (recentJobs.length() < 20) recentJobs.put(job);
+            }
+
+            String model = firstOr(status, value(source.optString("model"), "SDCP 3.0"), "model", "machineName", "printerName", "name");
+            config.put("model", model);
+            String state = activeJob != null && activeJob.getBoolean("printPaused", false) ? "paused" : activeJob != null && activeJob.getBoolean("printInProgress", false) ? "printing" : sdcpState(status);
+            JSObject result = new JSObject()
+                .put("config", config).put("state", state).put("latency", System.currentTimeMillis() - started)
+                .put("printerInfo", "API: SDCP 3.0").put("files", files).put("usedBytes", usedBytes).put("lastSeen", nowIso())
+                .put("recentJobs", recentJobs);
+            String firmware = firstOr(status, "", "firmware", "firmwareVersion", "version");
+            if (!firmware.trim().isEmpty()) result.put("firmware", firmware);
+            if (activeJob != null) result.put("activeJob", activeJob);
+            if (detailError != null) result.put("error", detailError);
+            return result;
+        } catch (Exception error) {
+            return new JSObject().put("config", config).put("state", "offline").put("files", new JSONArray()).put("usedBytes", 0).put("error", message(error));
+        }
+    }
+
     private JSObject normalizeJob(JSONObject raw) {
         int total = raw.optInt("totalSlices", 0);
         int current = raw.optInt("currentSlice", 0);
@@ -289,6 +448,8 @@ public class NovaFleetPlugin extends Plugin {
 
     private void upload(JSONObject printer, Uri uri) throws Exception {
         String fileName = displayName(uri);
+        if ("sdcp3".equals(printer.optString("protocol", "nova"))) throw new IOException("SDCP 3.0 upload is not enabled yet; this branch adds connection and status monitoring.");
+        if ("sdcp3".equals(printer.optString("protocol", "nova"))) throw new IOException("SDCP 3.0 dosya yukleme komutu henuz etkin degil; bu branch baglanti ve durum izleme destegi ekler.");
         if (!fileName.toLowerCase(Locale.ROOT).endsWith(".cws")) throw new IOException("Yalnızca .cws dosyaları yüklenebilir.");
         long size = fileSize(uri);
         HttpURLConnection connection = open(printer, "/file/upload/" + Uri.encode(fileName), 120000);
@@ -329,8 +490,98 @@ public class NovaFleetPlugin extends Plugin {
         return body;
     }
 
+    private String requestAny(JSONObject printer, String[] paths, int timeout) throws IOException {
+        IOException last = null;
+        for (String path : paths) {
+            try { return request(printer, path, timeout); }
+            catch (IOException error) { last = error; }
+        }
+        throw last != null ? last : new IOException("SDCP 3.0 yazÄ±cÄ± cevap vermedi.");
+    }
+
+    private JSONArray parseArray(String body) throws JSONException {
+        Object value = new JSONTokener(body).nextValue();
+        if (value instanceof JSONArray) return (JSONArray) value;
+        if (value instanceof JSONObject) {
+            JSONObject object = (JSONObject) value;
+            for (String key : new String[] { "data", "files", "printables", "printJobs", "jobs", "items" }) {
+                JSONArray array = object.optJSONArray(key);
+                if (array != null) return array;
+            }
+        }
+        return new JSONArray();
+    }
+
+    private JSONObject unwrap(JSONObject object) {
+        for (String key : new String[] { "data", "result", "printer", "status", "machine", "device" }) {
+            JSONObject nested = object.optJSONObject(key);
+            if (nested != null) {
+                Iterator<String> keys = nested.keys();
+                while (keys.hasNext()) {
+                    String item = keys.next();
+                    try { object.put(item, nested.opt(item)); } catch (JSONException ignored) {}
+                }
+                return object;
+            }
+        }
+        return object;
+    }
+
+    private String sdcpState(JSONObject status) {
+        String raw = firstOr(status, "", "state", "status", "printerStatus", "machineStatus", "printStatus").toLowerCase(Locale.ROOT);
+        if (raw.contains("pause")) return "paused";
+        if (raw.contains("print") || raw.contains("busy") || raw.contains("running") || raw.contains("expos")) return "printing";
+        if (raw.contains("error") || raw.contains("fault") || raw.contains("failed")) return "error";
+        return "online";
+    }
+
+    private String requestAny(JSONObject printer, String[] paths, int timeout) throws IOException {
+        IOException last = null;
+        for (String path : paths) {
+            try { return request(printer, path, timeout); }
+            catch (IOException error) { last = error; }
+        }
+        throw last != null ? last : new IOException("SDCP 3.0 printer did not respond.");
+    }
+
+    private JSONArray parseArray(String body) throws JSONException {
+        Object value = new JSONTokener(body).nextValue();
+        if (value instanceof JSONArray) return (JSONArray) value;
+        if (value instanceof JSONObject) {
+            JSONObject object = (JSONObject) value;
+            for (String key : new String[] { "data", "files", "printables", "printJobs", "jobs", "items" }) {
+                JSONArray array = object.optJSONArray(key);
+                if (array != null) return array;
+            }
+        }
+        return new JSONArray();
+    }
+
+    private JSONObject unwrap(JSONObject object) {
+        for (String key : new String[] { "data", "result", "printer", "status", "machine", "device" }) {
+            JSONObject nested = object.optJSONObject(key);
+            if (nested != null) {
+                Iterator<String> keys = nested.keys();
+                while (keys.hasNext()) {
+                    String item = keys.next();
+                    try { object.put(item, nested.opt(item)); } catch (JSONException ignored) {}
+                }
+                return object;
+            }
+        }
+        return object;
+    }
+
+    private String sdcpState(JSONObject status) {
+        String raw = firstOr(status, "", "state", "status", "printerStatus", "machineStatus", "printStatus").toLowerCase(Locale.ROOT);
+        if (raw.contains("pause")) return "paused";
+        if (raw.contains("print") || raw.contains("busy") || raw.contains("running") || raw.contains("expos")) return "printing";
+        if (raw.contains("error") || raw.contains("fault") || raw.contains("failed")) return "error";
+        return "online";
+    }
+
     private HttpURLConnection open(JSONObject printer, String path, int timeout) throws IOException {
-        int port = printer.optInt("port", 8081);
+        int port = printer.optInt("port", "sdcp3".equals(printer.optString("protocol", "nova")) ? 3030 : 8081);
         HttpURLConnection connection = (HttpURLConnection) new URL("http://" + printer.optString("host") + ":" + port + path).openConnection();
         connection.setConnectTimeout(timeout);
         connection.setReadTimeout(timeout);

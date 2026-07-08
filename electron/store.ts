@@ -47,6 +47,7 @@ export class PrinterStore {
       name: input.name.trim() || 'İsimsiz yazıcı',
       host: address.host,
       port: address.port,
+      protocol: input.protocol ?? 'nova',
       pollInterval: Math.max(5, Number(input.pollInterval) || 10),
     }
     const index = printers.findIndex((item) => item.id === printer.id)

@@ -7,7 +7,7 @@ import type { NovaFile, PrintJob, PrinterConfig, PrinterSnapshot } from '../src/
 
 const demoStartedAt = Date.now() - 52 * 60 * 1000
 
-type EndpointMode = 'nova8081' | 'services'
+type EndpointMode = 'nova8081' | 'services' | 'sdcp3'
 
 function requestBuffer(url: URL, method = 'GET', timeout = 4500): Promise<Buffer> {
   return new Promise((resolve, reject) => {
@@ -90,9 +90,10 @@ function nestedObject(value: unknown) {
 function cleanAddress(printer: PrinterConfig) {
   const cleaned = printer.host.trim().replace(/^https?:\/\//, '').replace(/\/.*$/, '')
   const match = cleaned.match(/^(.+?):(\d+)$/)
+  const fallbackPort = printer.protocol === 'sdcp3' ? 3030 : 8081
   return {
     host: (match ? match[1] : cleaned).trim(),
-    port: match ? Number(match[2]) : Number(printer.port) || 8081,
+    port: match ? Number(match[2]) : Number(printer.port) || fallbackPort,
   }
 }
 
@@ -160,6 +161,29 @@ export function normalizeJob(value: Record<string, unknown>): PrintJob {
   }
 }
 
+function parseJsonObject(buffer: Buffer, label: string): Record<string, unknown> {
+  const raw = text(buffer)
+  const data = JSON.parse(raw)
+  if (data && typeof data === 'object' && !Array.isArray(data)) return data as Record<string, unknown>
+  throw new Error(`${label} JSON nesnesi değil.`)
+}
+
+function unwrapObject(value: Record<string, unknown>) {
+  for (const key of ['data', 'result', 'printer', 'status', 'machine', 'device']) {
+    const nested = nestedObject(value[key])
+    if (nested) return { ...value, ...nested }
+  }
+  return value
+}
+
+function stateFromSdcp(value: Record<string, unknown>) {
+  const raw = string(pick(value, ['state', 'status', 'printerStatus', 'machineStatus', 'printStatus'], '')).toLowerCase()
+  if (['pause', 'paused'].some((item) => raw.includes(item))) return 'paused' as const
+  if (['print', 'printing', 'busy', 'running', 'exposure', 'exposing'].some((item) => raw.includes(item))) return 'printing' as const
+  if (['error', 'fault', 'failed'].some((item) => raw.includes(item))) return 'error' as const
+  return 'online' as const
+}
+
 const demoFiles: NovaFile[] = [
   { name: 'gearbox_v12', extension: 'cws', size: 48_890_112, modifiedDate: '2026-06-30T09:42:00', fullName: 'gearbox_v12.cws' },
   { name: 'enclosure-final', extension: 'cws', size: 72_241_152, modifiedDate: '2026-06-29T16:18:00', fullName: 'enclosure-final.cws' },
@@ -177,6 +201,10 @@ export class NovaClient {
     return [this.url(printer, path, 'services'), this.url(printer, path, 'services', true)]
   }
 
+  private sdcpUrls(printer: PrinterConfig, paths: string[]) {
+    return paths.map((path) => ({ url: this.url(printer, path, 'sdcp3', true), mode: 'sdcp3' as EndpointMode }))
+  }
+
   private async requestFirst(candidates: { url: URL; mode: EndpointMode }[], method = 'GET', timeout = 4500) {
     const errors: string[] = []
     for (const candidate of candidates) {
@@ -191,6 +219,7 @@ export class NovaClient {
 
   async snapshot(printer: PrinterConfig): Promise<PrinterSnapshot> {
     if (printer.host.startsWith('demo-')) return this.demoSnapshot(printer)
+    if (printer.protocol === 'sdcp3') return this.sdcpSnapshot(printer)
     const started = performance.now()
     try {
       const fileResult = await this.requestFirst([
@@ -246,8 +275,71 @@ export class NovaClient {
     }
   }
 
+  private async sdcpSnapshot(printer: PrinterConfig): Promise<PrinterSnapshot> {
+    const started = performance.now()
+    try {
+      const statusResult = await this.requestFirst(this.sdcpUrls(printer, [
+        '/api/v1/status',
+        '/api/v1/printer/status',
+        '/api/v1/device/status',
+        '/sdcp/status',
+        '/printer/status',
+        '/status',
+      ]), 'GET', 7000)
+      const status = unwrapObject(parseJsonObject(statusResult.body, 'SDCP durum'))
+      let files: NovaFile[] = []
+      let jobs: PrintJob[] = []
+      let detailError = ''
+
+      try {
+        const fileResult = await this.requestFirst(this.sdcpUrls(printer, [
+          '/api/v1/files',
+          '/api/v1/printables',
+          '/sdcp/files',
+          '/files',
+        ]), 'GET', 4500)
+        files = parseJsonArray(fileResult.body, 'SDCP dosya listesi').map(normalizeFile)
+      } catch (error) {
+        detailError = error instanceof Error ? error.message : 'SDCP dosya listesi alınamadı.'
+      }
+
+      try {
+        const jobResult = await this.requestFirst(this.sdcpUrls(printer, [
+          '/api/v1/jobs',
+          '/api/v1/print/status',
+          '/api/v1/printJobs',
+          '/sdcp/jobs',
+          '/jobs',
+        ]), 'GET', 4500)
+        jobs = parseJsonArray(jobResult.body, 'SDCP iş listesi').map(normalizeJob)
+      } catch {
+        const maybeJob = nestedObject(status.job) ?? nestedObject(status.printJob) ?? nestedObject(status.currentJob)
+        if (maybeJob) jobs = [normalizeJob(maybeJob)]
+      }
+
+      const activeJob = jobs.find((job) => job.printInProgress || job.printPaused)
+      const model = string(pick(status, ['model', 'machineName', 'printerName', 'name'], printer.model || 'SDCP 3.0'))
+      return {
+        config: { ...printer, model },
+        state: activeJob?.printPaused ? 'paused' : activeJob?.printInProgress ? 'printing' : stateFromSdcp(status),
+        latency: Math.round(performance.now() - started),
+        firmware: string(pick(status, ['firmware', 'firmwareVersion', 'version'], '')) || undefined,
+        printerInfo: 'API: SDCP 3.0',
+        files,
+        usedBytes: files.reduce((sum, file) => sum + file.size, 0),
+        activeJob,
+        recentJobs: jobs.filter((job) => job !== activeJob).slice(0, 20),
+        error: detailError || undefined,
+        lastSeen: new Date().toISOString(),
+      }
+    } catch (error) {
+      return { config: printer, state: 'offline', files: [], usedBytes: 0, error: error instanceof Error ? error.message : 'SDCP 3.0 bağlantısı kurulamadı.' }
+    }
+  }
+
   async command(printer: PrinterConfig, path: string) {
     if (printer.host.startsWith('demo-')) return
+    if (printer.protocol === 'sdcp3') throw new Error('SDCP 3.0 yazıcılarda dosya/iş komutları henüz etkin değil; bağlantı ve durum izleme desteklenir.')
     const servicesFallback = this.commandFallbacks(printer, path)
     await this.requestFirst([{ url: this.url(printer, path), mode: 'nova8081' }, ...servicesFallback], 'GET', 10_000)
   }
@@ -271,6 +363,7 @@ export class NovaClient {
       for (const percent of [12, 31, 54, 78, 100]) { onProgress(percent); await new Promise((resolve) => setTimeout(resolve, 120)) }
       return
     }
+    if (printer.protocol === 'sdcp3') throw new Error('SDCP 3.0 dosya yükleme komutu henüz etkin değil; bu branch bağlantı ve durum izleme desteği ekler.')
     const fileName = basename(filePath)
     const fileSize = (await stat(filePath)).size
     const encoded = encodeURIComponent(fileName)
