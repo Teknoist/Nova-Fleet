@@ -1,84 +1,108 @@
 # Nova Fleet
 
-Nova Fleet, birden fazla Nova3D reçine yazıcıyı aynı Windows uygulamasından izlemek ve yönetmek için geliştirilmiş modern bir masaüstü uygulamasıdır.
+Nova Fleet is a local-first desktop and Android printer manager for Nova3D-style resin printers and SDCP 3.0 compatible printers. It is built for managing multiple printers from one clean interface without a cloud account.
 
-![Platform](https://img.shields.io/badge/platform-Windows-1f6feb)
+[Türkçe README](README.tr.md)
+
+![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20Android-1f6feb)
 ![Electron](https://img.shields.io/badge/Electron-43-9feaf9)
 ![License](https://img.shields.io/badge/license-MIT-a9f4c7)
 
-## Yeni bilgisayara kurulum
+## Screenshots
 
-Normal kullanım için Node.js, Java veya başka bir geliştirme aracı kurmanız gerekmez.
+![Overview dashboard](docs/screenshots/overview.png)
 
-1. GitHub deposundaki **Releases** sayfasını açın.
-2. En güncel sürümden `Nova-Fleet-Setup-x.x.x.exe` dosyasını indirin.
-3. İndirilen kurulum dosyasını çalıştırın.
-4. Kurulum klasörünü seçip kurulumu tamamlayın.
-5. Masaüstündeki **Nova Fleet** kısayolunu açın.
+![File center](docs/screenshots/file-center.png)
 
-Uygulama henüz ticari kod imzalama sertifikasıyla imzalanmadığı için Windows SmartScreen uyarı gösterebilir. Dosyayı yalnızca bu deponun Releases sayfasından indirdiyseniz **Daha fazla bilgi → Yine de çalıştır** yolunu kullanabilirsiniz.
+![Printer profiles](docs/screenshots/printers.png)
 
-### Yazıcıları ekleme
+## Install on a new computer
 
-1. Bilgisayar ve yazıcıların aynı yerel ağda olduğundan emin olun.
-2. Nova Fleet içinde **Yazıcı ekle** düğmesine basın.
-3. Yazıcının adını ve yerel IP adresini girin.
-4. Portu, yazıcıda özel olarak değiştirilmediyse `8081` bırakın.
-5. Sorgulama aralığını eski firmware için en az `10 saniye` tutun.
-6. Profili kaydedin ve durumun **Hazır** olmasını bekleyin.
+Normal users do not need Node.js, Java, Android Studio, or any developer tooling.
 
-İlk açılışta arayüzü göstermek için üç demo yazıcı bulunur. Sunucu adları `demo-1`, `demo-2` ve `demo-3` olan bu profilleri Yazıcılar ekranından silebilirsiniz.
+1. Open the repository **Releases** page.
+2. Download the latest `Nova-Fleet-Setup-x.x.x.exe` installer.
+3. Run the installer.
+4. Choose the installation folder and complete setup.
+5. Start **Nova Fleet** from the desktop shortcut or Start Menu.
 
-## Temel özellikler
+The Windows installer is not code-signed yet. Windows SmartScreen may show a warning. If you downloaded the installer only from this repository's Releases page, use **More info → Run anyway**.
 
-- Birden fazla Nova3D yazıcı için merkezi filo görünümü
-- Çevrimiçi, yazdırıyor, duraklatıldı ve çevrimdışı durum takibi
-- `.cws` yükleme, listeleme, silme ve yazdırma
-- Katman, ilerleme, geçen süre ve tahmini kalan süre
-- Duraklatma, sürdürme ve işi durdurma
-- Yazıcı başına IP, port, model, konum ve sorgulama aralığı
-- Sorunlu eski firmware sürümlerini koruyan sıralı HTTP istekleri
-- İnternet veya bulut hesabı gerektirmeyen yerel çalışma
+## Adding printers
 
-## Android uygulaması
+1. Make sure the computer and printer are on the same local network.
+2. Open **Add printer** in Nova Fleet.
+3. Select the printer protocol:
+   - **Nova / Photonic3D** for Nova3D HTTP printers, usually port `8081`.
+   - **SDCP 3.0** for newer SDCP printers, usually TCP `3030` plus UDP discovery on `3000`.
+4. Enter the printer name and local IP address.
+5. Keep the polling interval at `10 seconds` or higher for older firmware.
+6. Save the profile and wait for the printer to become online.
 
-Android sürümü masaüstü sürümle aynı Nova3D işlevlerini sunar: çoklu yazıcı yönetimi, dosya listesi, `.cws` yükleme, silme, yazdırma, aktif iş takibi ve duraklat/sürdür/durdur kontrolleri.
+The app includes demo printers on first launch. You can delete the `demo-1`, `demo-2`, and `demo-3` profiles from the Printers page.
 
-GitHub Actions her Android değişikliğinde kurulabilir debug APK üretir:
+## Features
 
-1. Deponun **Actions** sayfasını açın.
-2. **Build Android APK** workflow'unu seçin.
-3. En güncel başarılı çalışmanın **Artifacts** bölümünden `Nova-Fleet-Android-<commit>` dosyasını indirin.
-4. Arşivdeki `app-debug.apk` dosyasını Android telefona aktarın ve kurun.
+- Multi-printer fleet dashboard.
+- Online, printing, paused, error, and offline state tracking.
+- Nova3D `.cws` file listing, upload, delete, and print commands.
+- SDCP 3.0 WebSocket status monitoring.
+- SDCP 3.0 `.ctb` file listing through the protocol file-list command.
+- Active job progress, layer count, elapsed time, and print metadata.
+- Pause/resume/stop controls for supported Nova3D printers.
+- Per-printer IP, port, protocol, model, location, and polling interval.
+- Local LAN operation with no cloud account.
+- Turkish and English interface support.
 
-Telefon ile yazıcıların aynı Wi-Fi ağına bağlı olması gerekir. Nova3D firmware yerel API'yi şifresiz HTTP üzerinden sunduğu için Android uygulaması yalnızca yerel ağdaki `:8081` bağlantılarına izin verir.
+## SDCP 3.0 support
 
-## Sorun giderme
+SDCP 3.0 support is implemented for status monitoring and file listing:
 
-### Yazıcı çevrimdışı görünüyor
+- UDP discovery uses `M99999` on port `3000`.
+- Status uses `ws://PRINTER_IP:3030/websocket` with SDCP command `0`.
+- File listing uses SDCP command `258` and checks common storage paths such as `/local/` and `/usb/`.
 
-- Bilgisayar ile yazıcının aynı ağ/VLAN üzerinde olduğunu kontrol edin.
-- Tarayıcıdan `http://YAZICI_IP:8081/file/list` adresini açmayı deneyin.
-- Windows Güvenlik Duvarı'nda Nova Fleet'e yerel ağ izni verin.
-- Yazıcı IP adresinin DHCP nedeniyle değişmediğini kontrol edin.
-- Firmware yoğun isteklerden sonra kilitlendiyse yazıcıyı yeniden başlatın.
+SDCP upload and print commands are intentionally not enabled yet. This avoids sending unsafe commands until the target printer behavior is verified.
 
-### Dosya yüklenmiyor
+## Android app
 
-- Dosyanın `.cws` biçiminde olduğundan emin olun.
-- Yazıcıda yeterli boş alan olup olmadığını kontrol edin.
-- Yükleme sırasında yazıcının ağ bağlantısını kesmeyin.
-- Çok büyük dosyalarda işlemin tamamlanması birkaç dakika sürebilir.
+The Android app provides the same fleet-management interface for local-network use. GitHub Actions builds an installable debug APK:
 
-### Ayarlar nerede tutuluyor?
+1. Open the repository **Actions** page.
+2. Select **Build Android APK**.
+3. Open the latest successful run.
+4. Download the APK artifact.
+5. Transfer the APK to the Android device and install it.
 
-Yazıcı profilleri yalnızca mevcut Windows kullanıcısında, Electron uygulama veri klasöründeki `printers.json` dosyasında tutulur. Parola veya bulut kimlik bilgisi kaydedilmez.
+The phone and printers must be on the same Wi-Fi/LAN.
 
-Uygulamayı kaldırmak profilleri otomatik olarak silmez. Tam temizlik için Windows'ta `%APPDATA%` ve `%LOCALAPPDATA%` altında **Nova Fleet** klasörünü kaldırabilirsiniz.
+## Troubleshooting
 
-## Geliştirici kurulumu
+### Printer appears offline
 
-Gereksinimler: Node.js 24 ve npm.
+- Confirm the computer and printer are on the same LAN/VLAN.
+- For Nova3D printers, open `http://PRINTER_IP:8081/file/list` in a browser.
+- For SDCP printers, make sure Windows Firewall allows Nova Fleet on private networks.
+- For SDCP printers, allow UDP `3000` and TCP `3030` on the local network.
+- Check that the printer IP did not change because of DHCP.
+- Restart the printer if its embedded HTTP/WebSocket service becomes unresponsive.
+
+### File list is empty
+
+- Nova3D printers usually expose `.cws` files through `/file/list`.
+- SDCP 3.0 printers usually expose `.ctb` files through command `258`.
+- Make sure the printer storage path is available and the printer is not busy scanning or writing files.
+
+### Upload fails
+
+- Nova3D upload expects `.cws` files.
+- Make sure the printer has enough free storage.
+- Keep the printer online during the whole upload.
+- Large files may take several minutes.
+
+## Developer setup
+
+Requirements: Node.js 24 and npm.
 
 ```powershell
 git clone https://github.com/Teknoist/Nova-Fleet.git
@@ -87,51 +111,36 @@ npm install
 npm run dev
 ```
 
-Kontroller ve üretim derlemesi:
+Checks and production build:
 
 ```powershell
 npm test
+npm run lint
 npm run build
 ```
 
-Windows kurulum paketi:
+Windows installer:
 
 ```powershell
 npm run package:win
 ```
 
-Android web varlıklarını ve yerel projeyi eşitlemek için:
+Android web sync:
 
 ```powershell
 npm run android:sync
 ```
 
-Android SDK kurulu bir geliştirme bilgisayarında debug APK:
+Android debug APK on a development machine with Android SDK:
 
 ```powershell
 cd android
 .\gradlew.bat assembleDebug
 ```
 
-Çıktı `release/Nova-Fleet-Setup-<sürüm>.exe` olarak oluşturulur.
+## Protocol notes
 
-## Otomatik GitHub Release
-
-`.github/workflows/release.yml` iki şekilde Windows paketi üretir:
-
-- GitHub Actions ekranından **Windows release → Run workflow** ile manuel derleme
-- `v0.1.0` benzeri bir Git etiketi gönderildiğinde otomatik GitHub Release
-
-Yeni sürüm yayınlama örneği:
-
-```powershell
-git tag v0.1.0
-git push origin v0.1.0
-```
-
-## Nova3D protokolü
-
-Uygulama yazıcının yerel HTTP servisindeki uçları kullanır:
+Nova3D HTTP printers use local endpoints such as:
 
 - `GET /file/list`
 - `POST /file/upload/{filename}`
@@ -141,12 +150,12 @@ Uygulama yazıcının yerel HTTP servisindeki uçları kullanır:
 - `GET /job/toggle/{jobId}`
 - `GET /job/stop/{jobId}`
 
-Bu davranış Nova3D Elfin firmware `3.5.0` esas alınarak uygulanmıştır. Farklı firmware sürümlerinde protokol değişebileceği için ilk gerçek baskıyı gözetim altında yapın.
+SDCP 3.0 printers use UDP discovery and WebSocket command envelopes. Test the first real print under supervision because firmware behavior can differ by model.
 
-## Güvenlik
+## Security
 
-Bu Nova3D firmware uçlarında kimlik doğrulama bulunmaz. Yazıcıları yalnızca güvenilen LAN/VLAN içinde kullanın ve `8081` portunu internete açmayın.
+These local printer APIs usually do not provide authentication. Use printers only on trusted LAN/VLAN networks and do not expose ports `8081`, `3000`, or `3030` to the internet.
 
-## Lisans
+## License
 
-MIT — ayrıntılar için [LICENSE](LICENSE) dosyasına bakın.
+MIT — see [LICENSE](LICENSE).
