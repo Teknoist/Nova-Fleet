@@ -1,84 +1,171 @@
 # Nova Fleet
 
-Nova Fleet, birden fazla Nova3D reçine yazıcıyı aynı Windows uygulamasından izlemek ve yönetmek için geliştirilmiş modern bir masaüstü uygulamasıdır.
+Nova Fleet is a local-first printer fleet manager for Nova3D resin printers and SDCP 3.0 compatible resin printers. It provides a polished Windows desktop app and an Android companion app for monitoring printers, browsing printer storage, and managing local print jobs on the same LAN.
 
-![Platform](https://img.shields.io/badge/platform-Windows-1f6feb)
+[Turkish documentation](README.tr.md)
+
+![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20Android-1f6feb)
+![Version](https://img.shields.io/badge/version-0.5.2-a9f4c7)
 ![Electron](https://img.shields.io/badge/Electron-43-9feaf9)
 ![License](https://img.shields.io/badge/license-MIT-a9f4c7)
 
-## Yeni bilgisayara kurulum
+## Screenshots
 
-Normal kullanım için Node.js, Java veya başka bir geliştirme aracı kurmanız gerekmez.
+### Windows desktop
 
-1. GitHub deposundaki **Releases** sayfasını açın.
-2. En güncel sürümden `Nova-Fleet-Setup-x.x.x.exe` dosyasını indirin.
-3. İndirilen kurulum dosyasını çalıştırın.
-4. Kurulum klasörünü seçip kurulumu tamamlayın.
-5. Masaüstündeki **Nova Fleet** kısayolunu açın.
+![Nova Fleet overview dashboard](docs/screenshots/overview.png)
 
-Uygulama henüz ticari kod imzalama sertifikasıyla imzalanmadığı için Windows SmartScreen uyarı gösterebilir. Dosyayı yalnızca bu deponun Releases sayfasından indirdiyseniz **Daha fazla bilgi → Yine de çalıştır** yolunu kullanabilirsiniz.
+![Nova Fleet file center](docs/screenshots/file-center.png)
 
-### Yazıcıları ekleme
+![Nova Fleet printer profiles](docs/screenshots/printers.png)
 
-1. Bilgisayar ve yazıcıların aynı yerel ağda olduğundan emin olun.
-2. Nova Fleet içinde **Yazıcı ekle** düğmesine basın.
-3. Yazıcının adını ve yerel IP adresini girin.
-4. Portu, yazıcıda özel olarak değiştirilmediyse `8081` bırakın.
-5. Sorgulama aralığını eski firmware için en az `10 saniye` tutun.
-6. Profili kaydedin ve durumun **Hazır** olmasını bekleyin.
+### Android / mobile layout
 
-İlk açılışta arayüzü göstermek için üç demo yazıcı bulunur. Sunucu adları `demo-1`, `demo-2` ve `demo-3` olan bu profilleri Yazıcılar ekranından silebilirsiniz.
+![Nova Fleet Android overview](docs/screenshots/android-overview.png)
 
-## Temel özellikler
+## What Nova Fleet does
 
-- Birden fazla Nova3D yazıcı için merkezi filo görünümü
-- Çevrimiçi, yazdırıyor, duraklatıldı ve çevrimdışı durum takibi
-- `.cws` yükleme, listeleme, silme ve yazdırma
-- Katman, ilerleme, geçen süre ve tahmini kalan süre
-- Duraklatma, sürdürme ve işi durdurma
-- Yazıcı başına IP, port, model, konum ve sorgulama aralığı
-- Sorunlu eski firmware sürümlerini koruyan sıralı HTTP istekleri
-- İnternet veya bulut hesabı gerektirmeyen yerel çalışma
+Nova Fleet is designed for small resin-printing workspaces that run more than one printer and need a practical local dashboard instead of checking every printer manually.
 
-## Android uygulaması
+It can:
 
-Android sürümü masaüstü sürümle aynı Nova3D işlevlerini sunar: çoklu yazıcı yönetimi, dosya listesi, `.cws` yükleme, silme, yazdırma, aktif iş takibi ve duraklat/sürdür/durdur kontrolleri.
+- show all configured printers in one fleet overview;
+- track online, printing, paused, error, and offline states;
+- show active print progress, current layer, total layers, elapsed time, and estimated remaining time when the printer exposes that data;
+- list files stored on supported printers;
+- upload, delete, and start `.cws` files on supported Nova3D HTTP printers;
+- list `.ctb` files on SDCP 3.0 compatible printers;
+- store printer profiles locally on the device;
+- work without a cloud account or remote server.
 
-GitHub Actions her Android değişikliğinde kurulabilir debug APK üretir:
+## Supported printer modes
 
-1. Deponun **Actions** sayfasını açın.
-2. **Build Android APK** workflow'unu seçin.
-3. En güncel başarılı çalışmanın **Artifacts** bölümünden `Nova-Fleet-Android-<commit>` dosyasını indirin.
-4. Arşivdeki `app-debug.apk` dosyasını Android telefona aktarın ve kurun.
+Nova Fleet currently supports two local printer protocols.
 
-Telefon ile yazıcıların aynı Wi-Fi ağına bağlı olması gerekir. Nova3D firmware yerel API'yi şifresiz HTTP üzerinden sunduğu için Android uygulaması yalnızca yerel ağdaki `:8081` bağlantılarına izin verir.
+| Mode | Typical port | File type | Current support |
+| --- | ---: | --- | --- |
+| Nova3D / Photonic3D HTTP | `8081` | `.cws` | status, files, upload, delete, print, pause/resume, stop |
+| SDCP 3.0 | UDP `3000`, TCP `3030` | `.ctb` | discovery, status monitoring, file listing |
 
-## Sorun giderme
+SDCP upload and remote print commands are intentionally disabled for now. SDCP printer models can differ in command behavior, so Nova Fleet only enables the SDCP operations that have been implemented defensively: discovery, status, and file listing.
 
-### Yazıcı çevrimdışı görünüyor
+## Download
 
-- Bilgisayar ile yazıcının aynı ağ/VLAN üzerinde olduğunu kontrol edin.
-- Tarayıcıdan `http://YAZICI_IP:8081/file/list` adresini açmayı deneyin.
-- Windows Güvenlik Duvarı'nda Nova Fleet'e yerel ağ izni verin.
-- Yazıcı IP adresinin DHCP nedeniyle değişmediğini kontrol edin.
-- Firmware yoğun isteklerden sonra kilitlendiyse yazıcıyı yeniden başlatın.
+Get the latest release from the GitHub Releases page:
 
-### Dosya yüklenmiyor
+- Windows installer: `Nova-Fleet-Setup-x.x.x.exe`
+- Android APK: `Nova-Fleet-Android-x.x.x.apk`
 
-- Dosyanın `.cws` biçiminde olduğundan emin olun.
-- Yazıcıda yeterli boş alan olup olmadığını kontrol edin.
-- Yükleme sırasında yazıcının ağ bağlantısını kesmeyin.
-- Çok büyük dosyalarda işlemin tamamlanması birkaç dakika sürebilir.
+Latest published release:
 
-### Ayarlar nerede tutuluyor?
+- [Nova Fleet v0.5.2](https://github.com/Teknoist/Nova-Fleet/releases/tag/v0.5.2)
 
-Yazıcı profilleri yalnızca mevcut Windows kullanıcısında, Electron uygulama veri klasöründeki `printers.json` dosyasında tutulur. Parola veya bulut kimlik bilgisi kaydedilmez.
+## Windows installation
 
-Uygulamayı kaldırmak profilleri otomatik olarak silmez. Tam temizlik için Windows'ta `%APPDATA%` ve `%LOCALAPPDATA%` altında **Nova Fleet** klasörünü kaldırabilirsiniz.
+Regular users do not need Node.js, npm, Java, Android Studio, or any development tools.
 
-## Geliştirici kurulumu
+1. Open [Releases](https://github.com/Teknoist/Nova-Fleet/releases).
+2. Download the latest `Nova-Fleet-Setup-x.x.x.exe`.
+3. Run the installer.
+4. Choose the installation folder.
+5. Launch **Nova Fleet** from the desktop shortcut or Start Menu.
 
-Gereksinimler: Node.js 24 ve npm.
+The Windows installer is not code-signed yet. Windows SmartScreen may show a warning. If you downloaded the file from this repository's official Releases page, choose **More info -> Run anyway**.
+
+## Android installation
+
+1. Open [Releases](https://github.com/Teknoist/Nova-Fleet/releases).
+2. Download the latest `Nova-Fleet-Android-x.x.x.apk`.
+3. Transfer the APK to your Android device.
+4. Allow installation from the selected source if Android asks.
+5. Install and open Nova Fleet.
+
+The Android device and printers must be connected to the same Wi-Fi/LAN. Some routers isolate Wi-Fi clients by default; disable client isolation if the app cannot reach printers that are visible from another device.
+
+## Adding a printer
+
+1. Make sure the printer and the app device are on the same local network.
+2. Open **Add printer**.
+3. Enter a clear display name, for example `Resin Lab 01`.
+4. Enter the printer IP address.
+5. Select the correct protocol:
+   - choose **Nova / Photonic3D** for older Nova3D HTTP printers;
+   - choose **SDCP 3.0** for newer printers that use SDCP.
+6. Confirm the port:
+   - Nova / Photonic3D usually uses `8081`;
+   - SDCP 3.0 usually uses TCP `3030` and UDP discovery on `3000`.
+7. Keep the polling interval at `10 seconds` or higher for older firmware.
+8. Save the profile and refresh the fleet.
+
+Demo printers are included on first launch so the interface is not empty. You can remove the demo profiles from the Printers page.
+
+## Network requirements
+
+Nova Fleet talks directly to printers on the local network.
+
+For Nova3D / Photonic3D printers:
+
+- HTTP access to `http://PRINTER_IP:8081`
+- Browser check: `http://PRINTER_IP:8081/file/list`
+
+For SDCP 3.0 printers:
+
+- UDP discovery on port `3000`
+- WebSocket status and file-list requests on TCP `3030`
+- WebSocket URL: `ws://PRINTER_IP:3030/websocket`
+
+On Windows, allow Nova Fleet through Windows Firewall for private networks. If ping or browser access works but Nova Fleet does not, firewall rules for UDP `3000` or TCP `3030` are the first thing to check for SDCP printers.
+
+## SDCP 3.0 implementation notes
+
+The SDCP path is not a simple HTTP status endpoint. Nova Fleet uses the SDCP flow expected by SDCP 3.0 printers:
+
+1. Send discovery packet `M99999` over UDP port `3000`.
+2. Read the printer response containing `MainboardIP`, `MainboardID`, and device name.
+3. Open `ws://PRINTER_IP:3030/websocket`.
+4. Request status with SDCP command `0`.
+5. Request storage file lists with SDCP command `258`.
+6. Normalize returned `.ctb` files into Nova Fleet's file table.
+
+If file listing fails, Nova Fleet keeps the printer online when status data is still available. A file-list problem should not incorrectly mark a working printer as offline.
+
+## Troubleshooting
+
+### Printer is offline
+
+- Confirm the IP address is correct.
+- Confirm the computer/phone and printer are on the same LAN or VLAN.
+- Restart the printer if its embedded service stopped responding.
+- Check whether DHCP changed the printer IP.
+- On Windows, allow Nova Fleet through the firewall.
+- For SDCP, make sure UDP `3000` and TCP `3030` are reachable.
+
+### Nova3D printer connects but file upload fails
+
+- Use `.cws` files.
+- Confirm the printer has enough storage.
+- Avoid sending many requests while the printer is busy.
+- Very large uploads can take several minutes.
+
+### SDCP printer connects but files are empty
+
+- Confirm the printer stores printable files as `.ctb`.
+- Confirm the files are on local or USB storage exposed by SDCP.
+- Refresh after the printer finishes scanning or writing storage.
+- If status works but files do not, the printer may reject command `258` for that storage path.
+
+## Data and privacy
+
+Nova Fleet stores printer profiles locally on the current device. It does not require a cloud account and does not send printer data to a hosted backend.
+
+On Windows, printer profiles are stored in the Electron application data folder as `printers.json`.
+
+## Developer setup
+
+Requirements:
+
+- Node.js 24
+- npm
 
 ```powershell
 git clone https://github.com/Teknoist/Nova-Fleet.git
@@ -87,66 +174,52 @@ npm install
 npm run dev
 ```
 
-Kontroller ve üretim derlemesi:
+Validation:
 
 ```powershell
 npm test
+npm run lint
 npm run build
 ```
 
-Windows kurulum paketi:
+Build the Windows installer:
 
 ```powershell
 npm run package:win
 ```
 
-Android web varlıklarını ve yerel projeyi eşitlemek için:
+Sync the Android project:
 
 ```powershell
 npm run android:sync
 ```
 
-Android SDK kurulu bir geliştirme bilgisayarında debug APK:
+Build an Android debug APK on a machine with the Android SDK:
 
 ```powershell
 cd android
 .\gradlew.bat assembleDebug
 ```
 
-Çıktı `release/Nova-Fleet-Setup-<sürüm>.exe` olarak oluşturulur.
+## Release process
 
-## Otomatik GitHub Release
+GitHub Actions builds Windows and Android artifacts. A normal release should include:
 
-`.github/workflows/release.yml` iki şekilde Windows paketi üretir:
+- `Nova-Fleet-Setup-x.x.x.exe`
+- `Nova-Fleet-Android-x.x.x.apk`
 
-- GitHub Actions ekranından **Windows release → Run workflow** ile manuel derleme
-- `v0.1.0` benzeri bir Git etiketi gönderildiğinde otomatik GitHub Release
-
-Yeni sürüm yayınlama örneği:
+Before publishing a release, run:
 
 ```powershell
-git tag v0.1.0
-git push origin v0.1.0
+npm test
+npm run lint
+npm run build
 ```
 
-## Nova3D protokolü
+## Security
 
-Uygulama yazıcının yerel HTTP servisindeki uçları kullanır:
+Most local resin-printer APIs do not provide authentication. Keep printers on a trusted LAN/VLAN and do not expose ports `8081`, `3000`, or `3030` to the public internet.
 
-- `GET /file/list`
-- `POST /file/upload/{filename}`
-- `GET /file/delete/{filename}`
-- `GET /file/print/{filename}`
-- `GET /job/list/`
-- `GET /job/toggle/{jobId}`
-- `GET /job/stop/{jobId}`
+## License
 
-Bu davranış Nova3D Elfin firmware `3.5.0` esas alınarak uygulanmıştır. Farklı firmware sürümlerinde protokol değişebileceği için ilk gerçek baskıyı gözetim altında yapın.
-
-## Güvenlik
-
-Bu Nova3D firmware uçlarında kimlik doğrulama bulunmaz. Yazıcıları yalnızca güvenilen LAN/VLAN içinde kullanın ve `8081` portunu internete açmayın.
-
-## Lisans
-
-MIT — ayrıntılar için [LICENSE](LICENSE) dosyasına bakın.
+Nova Fleet is released under the MIT License. See [LICENSE](LICENSE).

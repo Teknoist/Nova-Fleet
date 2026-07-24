@@ -1,10 +1,12 @@
 export type PrinterState = 'online' | 'offline' | 'printing' | 'paused' | 'error'
+export type PrinterProtocol = 'nova' | 'sdcp3'
 
 export interface PrinterConfig {
   id: string
   name: string
   host: string
   port: number
+  protocol?: PrinterProtocol
   model: string
   location: string
   pollInterval: number

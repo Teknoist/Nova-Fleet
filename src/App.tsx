@@ -1439,6 +1439,7 @@ function PrinterModal({
         name: "",
         host: "",
         port: 8081,
+        protocol: "nova",
         model: tr("Otomatik algılanıyor", "Detecting automatically"),
         location: "",
         pollInterval: 10,
@@ -1452,6 +1453,17 @@ function PrinterModal({
     key: keyof SavePrinterInput,
     next: string | number | boolean,
   ) => setForm((current) => ({ ...current, [key]: next }));
+  const setProtocol = (protocol: SavePrinterInput["protocol"]) =>
+    setForm((current) => ({
+      ...current,
+      protocol,
+      port:
+        protocol === "sdcp3" && current.port === 8081
+          ? 3030
+          : protocol === "nova" && current.port === 3030
+            ? 8081
+            : current.port,
+    }));
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape" && !saving) close();
@@ -1530,6 +1542,22 @@ function PrinterModal({
               value={form.port}
               onChange={(e) => field("port", Number(e.target.value))}
             />
+          </label>
+          <label className="full">
+            <span>{tr("BaÄŸlantÄ± protokolÃ¼", "Connection protocol")}</span>
+            <select
+              value={form.protocol ?? "nova"}
+              onChange={(e) => setProtocol(e.target.value as SavePrinterInput["protocol"])}
+            >
+              <option value="nova">Nova3D HTTP / Photonic3D</option>
+              <option value="sdcp3">SDCP 3.0</option>
+            </select>
+            <small>
+              {tr(
+                "Nova varsayÄ±lanÄ± 8081, SDCP 3.0 varsayÄ±lanÄ± 3030. Ã–zel port yazarsan protokol deÄŸiÅŸiminde korunur.",
+                "Nova defaults to 8081, SDCP 3.0 defaults to 3030. Custom ports are preserved when switching protocol.",
+              )}
+            </small>
           </label>
           <label className="full">
             <span>{tr("Konum", "Location")}</span>
