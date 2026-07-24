@@ -1,6 +1,6 @@
 # Nova Fleet
 
-[English README](README.md)
+[English documentation](README.md)
 
 Nova Fleet, birden fazla Nova3D reçine yazıcıyı aynı Windows uygulamasından izlemek ve yönetmek için geliştirilmiş modern bir masaüstü uygulamasıdır.
 
@@ -15,6 +15,8 @@ Nova Fleet, birden fazla Nova3D reçine yazıcıyı aynı Windows uygulamasında
 ![Dosya merkezi](docs/screenshots/file-center.png)
 
 ![Yazıcı profilleri](docs/screenshots/printers.png)
+
+![Android / mobil genel görünüm](docs/screenshots/android-overview.png)
 
 ## Yeni bilgisayara kurulum
 
